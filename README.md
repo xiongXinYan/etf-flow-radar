@@ -22,10 +22,10 @@ Four signals, deliberately kept separate:
 |---|---|---|
 | Turnover multiple | Today's cumulative turnover vs. 20-day average, aligned to the same point in the session | Reliable, but noisy day to day |
 | Active net flow | Tick-direction estimate from outer/inner volume | Direction only, and arbitrage cancels a lot of it |
-| Shares | Exchange-cleared totals (SSE / SZSE); falls back to volume ÷ turnover rate, then market cap ÷ price | Sign is meaningful; magnitude is now official |
+| Net subscription | Σ (Δ shares × price) per ETF, then summed in money | Direction is firm; counterparty unknown |
 | Excess return | ETF move minus tracking-index move | Strips out the beta that dominates ETF prices |
 
-These feed a weighted score, bucketed into plain-language verdicts. Weights are mutually exclusive (primary-market flow 40%, turnover 25%, excess return 20%, trade-direction estimate 15%); price change is a background variable and does not enter the score. Thresholds live in one dictionary (`TH` in `snapshots/insight.py`) so they can be tuned without touching the logic.
+Each factor is normalised to [-1, 1], then weighted (primary-market flow 40%, turnover 25%, excess return 20%, trade-direction estimate 15%). Total score is therefore bounded in [-1, 1]. Price change is a background variable and does not enter the score. Thresholds live in one dictionary (`TH` in `snapshots/insight.py`) so they can be tuned without touching the logic.
 
 ## Why this differs from the usual version
 
@@ -131,3 +131,31 @@ Two separate failures on 2026-11-10, with different causes:
 The Eastmoney source also returns traded amount directly (`f57`), so the 20-day average no longer relies on estimation. Cross-checked on 510300: real amount average vs volume × close differs by 0.19%.
 
 `REQUEST_GAP = 0.35` seconds separates ETFs, and a detected WAF page raises `WAFBlocked` instead of being retried.
+
+## Net subscription is Δshares × price, not Δmarket value
+
+This is the one place where a plausible-looking formula gives a badly wrong answer.
+
+`A_t = S_t × P_t` is *market value*, not subscription amount. Expanding the day-over-day change:
+
+```
+ΔA = (ΔS)·P_{t-1} + S_{t-1}·ΔP + (ΔS)·(ΔP)
+```
+
+The middle term is pure price movement. An ETF whose shares did not change at all, but whose price rose 1%, produced **4.45 亿元 of fake net subscription** on a representative pool — with zero money entering.
+
+The correct calculation only lets share changes set the sign:
+
+```
+F_t = Σ_i (S_{i,t} − S_{i,t−1}) × P_{i,t}
+```
+
+`tests/test_share_flow.py` pins this down: shares flat with a 1% price rise must yield exactly zero flow, and a 10B-share increase at 3.3 yuan must yield 33B, not the 63B that the market-value method reports.
+
+## Other fixes in this round
+
+- **Excess return uses dividend-adjusted prices.** Unadjusted ETF price versus a price index books every dividend ex-date as underperformance. Daily klines now carry both `close` (unadjusted, for turnover) and `close_qfq` (adjusted, for excess return), and excess is computed as a wealth ratio `(1+Re)/(1+Ri)−1` rather than a return difference. The index side is still a price index — total-return indices are not in the free source — so this is labelled a *price* excess.
+- **Index klines merge per index.** A single failed index no longer overwrites the whole file; each entry carries `last_date`.
+- **Turnover baseline is quality-tagged.** `amount_quality` is `official` when every day came with a real traded amount, `estimated` when it fell back to volume × close, `mixed` otherwise.
+- **5-minute bar completeness.** A day now needs ≥20 bars in the morning and ≥20 in the afternoon with no duplicate timestamps; a bar count alone accepted sessions that were missing an entire half-day.
+- **Score is genuinely weighted.** Each factor is clamped to [-1, 1] first. Previously the ceilings were +1.6 / +1.0 / +0.8 / +0.6, so the nominal 40/25/20/15 split did not hold. `score_missing` names factors that were absent rather than silently scoring them as neutral.

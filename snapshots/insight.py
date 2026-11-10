@@ -27,6 +27,7 @@ TH = {
     "active_strong": 30e8,   # 主动净买入绝对值（元）
     "share_strong": 10.0,    # 池内单日净申购（亿元）
     "coverage_min": 0.6,     # 主动盘数据覆盖率下限，低于此不参与综合评分
+    "share_flow_scale": 50.0,  # 池内单日净申购 ±50 亿元记为满分（±1）
 }
 
 # 指数映射统一从采集模块取，保证「采什么」和「算什么」一致
@@ -54,11 +55,19 @@ def excess_returns(rows, idx):
         dates = [x for x in sorted(emap) if x in imap]
         if len(dates) < 21:
             continue
+        # 口径：ETF 用分红复权价（qfq）算收益，指数用价格指数。
+        # 用不复权 ETF 价对比价格指数，会把分红除息当成「跑输基准」。
+        # 理论上指数也该用全收益指数，但免费源里拿不到，所以这里记为
+        # 「价格超额」，并在分红日附近会有一到两个基点的偏差，不做进一步修正。
+        # 且用财富比而非收益率相减：(1+Re)/(1+Ri)-1，短周期差异极小但定义一致。
+        emap_q = {x["date"]: (x.get("close_qfq") or x["close"]) for x in d}
         for n, label in ((1, "d1"), (5, "d5"), (20, "d20")):
             if len(dates) > n:
-                e0, e1 = emap[dates[-1 - n]], emap[dates[-1]]
+                e0, e1 = emap_q[dates[-1 - n]], emap_q[dates[-1]]
                 i0, i1 = imap[dates[-1 - n]], imap[dates[-1]]
-                r["m"]["excess"][label] = round(((e1 / e0) - (i1 / i0)) * 100, 2)
+                if not (e0 and i0):
+                    continue
+                r["m"]["excess"][label] = round(((e1 / e0) / (i1 / i0) - 1) * 100, 2)
     return rows
 
 
@@ -144,43 +153,39 @@ def judge(b, idx):
     exs = [r["m"]["excess"].get("d1") for r in focus if r["m"].get("excess")]
     ex_med = statistics.median(exs) if exs else None
 
-    # 4) 综合结论（四个一级因子，去除重复计数）
-    # 旧版把「成交额倍数」「主动净买入」「涨跌」「超额」直接相加，
-    # 但主动净买入 = 方向 × 成交额、涨跌与超额高度相关，
-    # 等于对「放量」和「上涨」各加了两次权。这里改为互不重复的四项：
-    #   一级市场申赎 40%（份额×净值，最硬）
-    #   成交活跃度   25%
-    #   价格表现(超额) 20%
-    #   二级方向估算 15%
-    # 涨跌幅只作为背景变量，不进评分。
-    score = 0.0
-    score_parts = {}
+    # 4) 综合结论
+    # 每个因子先标准化到 [-1, 1]，再乘明确权重，总分天然落在 [-1, 1]。
+    # 之前每个因子各自截断在不同区间（+1.6 / +1.0 / +0.8 / +0.6），
+    # 名义上的 40/25/20/15 根本不成立。
+    # 权重是研究设定的起点，未经回测，不要当成最优参数。
+    W = {"share": 0.40, "turnover": 0.25, "excess": 0.20, "active": 0.15}
+    raw = {}
     sh_amt = None
-    if b["share_series"] and len(b["share_series"]) > 1 and b["share_series"][-1]["delta"] is not None:
-        sh_amt = b["share_series"][-1]["delta"]          # 亿元
-        score_parts["share"] = max(-1.0, min(1.6, sh_amt / 40))
-        score += score_parts["share"]
+    if b["share_series"] and len(b["share_series"]) > 1:
+        last = b["share_series"][-1]
+        sh_amt = last.get("flow")
+        if sh_amt is not None:
+            raw["share"] = max(-1.0, min(1.0, sh_amt / TH["share_flow_scale"]))
     if mult is not None:
-        score_parts["turnover"] = max(-0.75, min(1.0, (mult - 1) * 1.5))
-        score += score_parts["turnover"]
+        raw["turnover"] = max(-1.0, min(1.0, (mult - 1) / 0.8))
     if ex_med is not None:
-        score_parts["excess"] = max(-0.5, min(0.8, ex_med / 1.0))
-        score += score_parts["excess"]
-    # 覆盖率不足时，主动盘只能作为方向参考，不参与评分
+        raw["excess"] = max(-1.0, min(1.0, ex_med / 1.0))
     cov = A.get("net_covered")
     if net is not None and cov is not None and cov >= TH["coverage_min"]:
-        score_parts["active"] = max(-0.6, min(0.6, net / 8e9))
-        score += score_parts["active"]
-    else:
-        score_parts["active"] = 0.0
+        raw["active"] = max(-1.0, min(1.0, net / 8e9))
 
-    if score >= 2.2:
+    score_parts = {k: round(W[k] * raw.get(k, 0.0), 3) for k in W}
+    score = sum(score_parts.values())
+    # 缺数据的因子按 0 计入，但要说明，避免把「没数据」当成「中性」
+    missing = [k for k in W if k not in raw]
+
+    if score >= 0.55:
         verdict = ("强信号：疑似集中买入", "buy-strong")
-    elif score >= 1.0:
+    elif score >= 0.25:
         verdict = ("偏强：有买入迹象", "buy-mild")
-    elif score <= -2.2:
+    elif score <= -0.55:
         verdict = ("强信号：疑似集中卖出", "sell-strong")
-    elif score <= -1.0:
+    elif score <= -0.25:
         verdict = ("偏弱：有卖出迹象", "sell-mild")
     else:
         verdict = ("没看出上班迹象", "flat")
@@ -212,7 +217,9 @@ def judge(b, idx):
         "fund": fund,
         "vol": vol,
         "excess_med": ex_med,
-        "score_parts": {k: round(v, 2) for k, v in score_parts.items()},
+        "score_parts": score_parts,
+        "score_weights": W,
+        "score_missing": missing,
         "coverage": round(cov, 3) if cov is not None else None,
         "share_amt": round(sh_amt, 2) if sh_amt is not None else None,
         "notes": notes,

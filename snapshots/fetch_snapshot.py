@@ -164,6 +164,7 @@ def fetch_realtime(codes):
                 "inner": _f(payload, 8),     # 内盘（手）
                 "turnover_rate": _f(payload, 38),
                 "scale_yi": _f(payload, 45),                 # 行情口径市值(亿元)=成交量×现价
+                "amount_source": "tencent_realtime",
             }
             # 份额：用「成交量(份) ÷ 换手率」反推总份额，而不是「市值 ÷ 价格」
             # （后者对 1.0 元附近的面值类 ETF 在低价时误差可达 2~3 倍）
@@ -190,20 +191,30 @@ def em_secid(code: str) -> str:
     return f"{market}.{c}"
 
 
-def fetch_daily_em(code, days=60):
-    """东方财富不复权日K（fqt=0 即不复权）。返回结构与腾讯版一致。"""
+def _em_klines(code, days, fqt):
+    """东财日K。fqt=0 不复权，fqt=1 前复权。"""
     h = dict(HEADERS, Referer="https://quote.eastmoney.com/")
     params = {
         "secid": em_secid(code),
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57",
-        "klt": "101", "fqt": "0", "end": "20500101", "lmt": str(days),
+        "klt": "101", "fqt": str(fqt), "end": "20500101", "lmt": str(days),
     }
     r = _session(direct=True).get(EM_KLINE, params=params, headers=h, timeout=20)
     r.raise_for_status()
-    d = (r.json() or {}).get("data") or {}
+    return ((r.json() or {}).get("data") or {}).get("klines") or []
+
+
+def fetch_daily_em(code, days=60):
+    """东方财富日K。
+
+    同时取两套价格，因为它们服务不同用途，混用会各自出错：
+    - 不复权(fqt=0)：算成交额。复权价不是真实成交价。
+    - 前复权(fqt=1)：算超额收益。不复权价在分红除息日会凭空跌一段。
+    """
+    base = _em_klines(code, days, 0)
     out = []
-    for row in d.get("klines") or []:
+    for row in base:
         x = row.split(",")
         # date,open,close,high,low,volume(手),amount(元)
         out.append({
@@ -214,6 +225,13 @@ def fetch_daily_em(code, days=60):
         })
     if not out:
         raise RuntimeError(f"eastmoney empty for {code}")
+    # 复权价作为附加字段，取不到不影响主流程
+    try:
+        qmap = {r.split(",")[0]: float(r.split(",")[2]) for r in _em_klines(code, days, 1)}
+        for d in out:
+            d["close_qfq"] = qmap.get(d["date"])
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 
@@ -516,17 +534,35 @@ def main(check_only=False):
     # 指数日K：之前 index_daily.json 没有任何采集代码更新，超额收益会长期吃旧数据
     try:
         m = idx_map(pool)
-        idx = fetch_index_daily(sorted(m.values()), 120)
-        payload = {
-            code: {"name": name, "code": code, "daily": idx.get(code, [])}
-            for name, code in m.items()
-        }
-        # 只有拿到数据才覆盖，避免一次网络失败把历史清空
-        payload = {k: v for k, v in payload.items() if v["daily"]}
-        if payload:
-            json.dump(payload, open(IDX_PATH, "w", encoding="utf-8"), ensure_ascii=False)
+        got = fetch_index_daily(sorted(m.values()), 120)
+        payload = {}
+        if os.path.exists(IDX_PATH):
+            try:
+                payload = json.load(open(IDX_PATH, encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                payload = {}
+        # 逐指数合并：某个指数取失败不能把其余指数的历史一起抹掉
+        ok_n = 0
+        for name, code in m.items():
+            new = got.get(code) or []
+            if not new:
+                row["degraded"].append(f"index:{code}:empty")
+                continue
+            old = (payload.get(code) or {}).get("daily") or []
+            merged = {x["date"]: x for x in old}
+            for x in new:
+                merged[x["date"]] = x
+            payload[code] = {
+                "name": name, "code": code,
+                "daily": [merged[k] for k in sorted(merged)],
+                "last_date": max(merged) if merged else None,
+            }
+            ok_n += 1
+        if ok_n:
+            json.dump(payload, open(IDX_PATH, "w", encoding="utf-8"),
+                      ensure_ascii=False, sort_keys=True)
         else:
-            row["degraded"].append("index:empty")
+            row["degraded"].append("index:all_empty")
     except Exception as e:  # noqa: BLE001
         row["degraded"].append(f"index:{type(e).__name__}")
     hist[today] = row

@@ -130,6 +130,17 @@ def _daily_avg_amount(rec) -> float | None:
     return sum(vals) / len(vals)
 
 
+def _amount_quality(rec) -> str:
+    """成交量基准的质量：official=真实成交额，estimated=量×价近似。"""
+    days = [d for d in rec.get("daily", []) if d["date"] < rec.get("date", "9999")][-20:]
+    if not days:
+        return "missing"
+    real = sum(1 for d in days if d.get("amount"))
+    if real == len(days):
+        return "official"
+    return "estimated" if real == 0 else "mixed"
+
+
 def intraday_curve(rec) -> dict:
     """从近 N 日 5 分钟K 计算：每个时点累计成交额占全天的平均比例。"""
     m5 = rec.get("m5") or []
@@ -141,6 +152,14 @@ def intraday_curve(rec) -> dict:
         bars.sort(key=lambda b: b["t"])
         total = sum(b["volume_lots"] for b in bars)
         if total <= 0 or len(bars) < 40:
+            continue
+        # 只数根数不够：缺一整个下午也可能凑满 40 根。
+        # 要求上午和下午都各有足够K线，且时间戳不重复。
+        am = sum(1 for b in bars if b["t"][8:12] <= "1130")
+        pm = sum(1 for b in bars if b["t"][8:12] >= "1300")
+        if am < 20 or pm < 20:
+            continue
+        if len({b["t"] for b in bars}) != len(bars):
             continue
         cum, pts = 0.0, {}
         for b in bars:
@@ -212,6 +231,7 @@ def compute_row(rec, curve) -> dict:
         "pct": rec.get("pct"),
         "scale": rec.get("scale_yi"),
         "hhmm": hhmm,
+        "amount_quality": _amount_quality(rec),
         "shares_source": "official" if (
             official_shares().get(rec.get("date"), {}).get(rec.get("code"))) else "estimated",
     }
@@ -250,36 +270,66 @@ def build(day_key: str | None = None) -> dict:
     A = agg(focus)
 
     # 份额与申赎金额时序（focus 池合计）
-    # 关键：跨 ETF 不能直接加份数。净值 4 元的 1 亿份是 4 亿元，
-    # 净值 1.3 元的 1 亿份只有 1.3 亿元，份数相加会把高净值产品的申赎放大成假的「大额加仓」。
-    # 因此统一换算成「份额 × 现价 = 估算申赎金额」，用金额汇总。
+    #
+    # 两个容易做错的地方：
+    # 1) 跨 ETF 不能加份数：净值 4 元的 1 亿份是 4 亿元，净值 1.3 元的 1 亿份只有 1.3 亿元。
+    # 2) 更隐蔽的错：用「当日总市值 - 昨日总市值」当申赎金额。
+    #    A_t = S_t × P_t，则 ΔA = (ΔS)·P_{t-1} + S_{t-1}·ΔP + (ΔS)(ΔP)，
+    #    中间那项纯粹是价格涨跌。份额一动没动、价格涨 1%，也会算出几亿「净申购」。
+    #    正确口径：F = Σ (S_t - S_{t-1}) × P_t —— 只让份额变化决定正负，价格只做单位换算。
     share_series = []
+    share_quality = []
+    prev_by_code = None
+    prev_date = None
     for d in sorted(hist):
         s = hist[d]
         tot_sh = 0.0
         tot_amt = 0.0
+        flow = 0.0
         n = 0
+        n_flow = 0
+        n_official = 0
         for r in s["pool"]:
             if r["tier"] != "focus":
                 continue
-            sh = shares_of({**r, "date": d})
+            rr = {**r, "date": d}
+            sh = shares_of(rr)
             pr = r.get("price")
-            if sh and pr:
-                tot_sh += sh
-                tot_amt += sh * pr                 # 亿元
-                n += 1
+            if not (sh and pr):
+                continue
+            tot_sh += sh
+            tot_amt += sh * pr                 # 亿元，仅用于展示规模
+            n += 1
+            src = "official" if official_shares().get(d, {}).get(r.get("code")) else "estimated"
+            if src == "official":
+                n_official += 1
+            if prev_by_code is not None:
+                prev = prev_by_code.get(r["code"])
+                if prev:
+                    psh = shares_of({**prev, "date": prev_date})
+                    if psh is not None:
+                        flow += (sh - psh) * pr      # 亿元
+                        n_flow += 1
         if n >= len(focus) * 0.8:
-            share_series.append({"date": d, "shares": tot_sh, "amount": tot_amt, "n": n})
-    # 加仓指数：按金额
-    if share_series:
-        base = share_series[0]["amount"]
-        for p in share_series:
-            p["index"] = round(100 * p["amount"] / base, 2) if base else None
-            p["delta"] = None
-            p["delta_shares"] = None
-    for i in range(1, len(share_series)):
-        share_series[i]["delta"] = round(share_series[i]["amount"] - share_series[i - 1]["amount"], 2)
-        share_series[i]["delta_shares"] = round(share_series[i]["shares"] - share_series[i - 1]["shares"], 2)
+            share_series.append({
+                "date": d, "shares": tot_sh, "amount": tot_amt, "n": n,
+                # 首日没有前值，flow 无意义
+                "flow": round(flow, 3) if n_flow else None,
+                "flow_n": n_flow,
+                "official_n": n_official,
+                "official_ratio": round(n_official / n, 3) if n else None,
+                "flow_all_official": bool(n_flow and n_official == n),
+            })
+        prev_by_code = {r["code"]: r for r in s["pool"]}
+        prev_date = d
+
+    # 加仓指数：以首日累计净申购为基准累加（单位亿元），不是市值指数
+    cum = 0.0
+    for i, p in enumerate(share_series):
+        if i > 0 and p["flow"] is not None:
+            cum += p["flow"]
+        p["cum_flow"] = round(cum, 2)
+        p["cum_index"] = round(100 + cum, 2)
 
     prev_snap_date = None
     dates = sorted(hist)
