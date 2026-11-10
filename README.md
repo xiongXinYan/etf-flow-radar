@@ -22,7 +22,7 @@ Four signals, deliberately kept separate:
 |---|---|---|
 | Turnover multiple | Today's cumulative turnover vs. 20-day average, aligned to the same point in the session | Reliable, but noisy day to day |
 | Active net flow | Tick-direction estimate from outer/inner volume | Direction only, and arbitrage cancels a lot of it |
-| Estimated shares | Volume ÷ turnover rate (fallback: quote-side market cap ÷ price) | Sign is meaningful; magnitude is approximate |
+| Shares | Exchange-cleared totals (SSE / SZSE); falls back to volume ÷ turnover rate, then market cap ÷ price | Sign is meaningful; magnitude is now official |
 | Excess return | ETF move minus tracking-index move | Strips out the beta that dominates ETF prices |
 
 These feed a weighted score, bucketed into plain-language verdicts. Weights are mutually exclusive (primary-market flow 40%, turnover 25%, excess return 20%, trade-direction estimate 15%); price change is a background variable and does not enter the score. Thresholds live in one dictionary (`TH` in `snapshots/insight.py`) so they can be tuned without touching the logic.
@@ -96,3 +96,19 @@ The Chinese term 国家队 ("national team") is market slang for state-linked bu
 - **Index klines are fetched by `fetch_snapshot.py` into `index_daily.json`.** Before this, nothing wrote that file and excess return silently used stale data.
 - **5-minute bars accumulate in `snapshots/m5/`.** The upstream endpoint caps at ~320 bars (about 6.7 sessions) regardless of the requested count, so the same-point intraday curve is only trustworthy once a few weeks of snapshots have piled up.
 - **Timestamps are parsed, never sliced.** Field 30 is `yyyymmddHHMMSS`; a fixed `[8:12]` slice breaks silently if the format ever changes to `YYYY-MM-DD HH:MM:SS`.
+
+## Official share data (verified by live probing, 2026-11-10)
+
+| Source | Endpoint | Coverage | History |
+|---|---|---|---|
+| SSE | `query.sse.com.cn/commonQuery.do?sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L` | 923 ETFs in one call, `TOT_VOL` in 万份 | `STAT_DATE` param works |
+| SZSE | `www.szse.cn/api/report/ShowReport/data?CATALOGID=1945&TABKEY=tab1&PAGENO=n` | 772 ETFs, 10 per page / 78 pages, `dqgm` in 万份 | latest only; date params ignored |
+
+Merged results land in `snapshots/shares_official.json`, keyed by data date. `metrics.shares_of()` prefers the official figure and only falls back to estimation when a date is missing.
+
+Operational notes, all measured:
+- SSE needs `Referer: https://www.sse.com.cn/`, otherwise it returns `System Error`.
+- SZSE ignores date parameters and only serves the latest snapshot, so history must accumulate locally.
+- SZSE resets the connection under fast sequential paging; 0.15 s spacing plus session rebuild on failure pulled all 78 pages reliably in ~16 s. It runs in a background thread alongside the quote fetch.
+- Both exchanges resolve through direct connections only. A system proxy made SZSE page reads time out.
+- Cross-check on all 24 pool ETFs: official vs estimated shares differ by at most 0.44%.

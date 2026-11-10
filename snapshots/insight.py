@@ -231,7 +231,7 @@ def enrich(day_key=None):
         prev = {r["code"]: r for r in hist[dates[i - 1]]["pool"]}
         for r in b["rows"]:
             p = prev.get(r["code"])
-            psh = shares_of(p) if p else None
+            psh = shares_of({**p, "date": dates[i - 1]}) if p else None
             if psh is None or not r["m"]["shares"]:
                 r["m"]["share_chg"] = None
                 r["m"]["share_chg_amt"] = None

@@ -11,8 +11,10 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -24,6 +26,7 @@ SNAP_DIR = os.path.join(ROOT, "snapshots")
 POOL_PATH = os.path.join(SNAP_DIR, "pool.json")
 HIST_PATH = os.path.join(SNAP_DIR, "history.json")
 IDX_PATH = os.path.join(SNAP_DIR, "index_daily.json")
+SHARE_PATH = os.path.join(SNAP_DIR, "shares_official.json")
 
 # 指数代码映射：采集与超额收益计算共用同一份，避免两处各写一遍
 IDX_MAP = {
@@ -199,6 +202,146 @@ def merge_m5(code: str, bars, keep_days: int = 30):
     return out
 
 
+# ---------- 交易所官方份额 ----------
+# 实测结论（2026-11-10）：
+#   SSE : commonQuery.do?sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L
+#         一次返回全市场 923 只，字段 STAT_DATE / SEC_CODE / SEC_NAME / TOT_VOL(万份)
+#         支持 STAT_DATE 参数回取历史；需 Referer=https://www.sse.com.cn/
+#   SZSE: api/report/ShowReport/data?CATALOGID=1945&TABKEY=tab1&PAGENO=n
+#         每页 10 条共 772 条 / 78 页，字段 dqgm 即总份额(万份)，日期在 metadata.subname
+#         忽略日期参数（只能取最新），连续高速请求会被重置连接，须退避重试
+SSE_SHARE_URL = "https://query.sse.com.cn/commonQuery.do"
+SSE_SHARE_SQL = "COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L"
+SZSE_SHARE_URL = "http://www.szse.cn/api/report/ShowReport/data"
+SZSE_SHARE_CATALOG = "1945"
+
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _direct_session():
+    """交易所接口走直连。
+
+    系统代理（如 127.0.0.1:7897）会让 szse 的连续请求直接读超时，
+    所以这里显式 trust_env=False，不走环境代理。
+    """
+    s = requests.Session()
+    s.trust_env = False
+    return s
+
+
+def _strip(x):
+    return _TAG.sub("", x or "").strip()
+
+
+def fetch_sse_shares(date=None):
+    """上交所 ETF 总份额 -> {code: {date, name, shares}}，shares 单位亿份。"""
+    h = dict(HEADERS, Referer="https://www.sse.com.cn/")
+    p = {"sqlId": SSE_SHARE_SQL}
+    if date:
+        p["STAT_DATE"] = date
+    s = _direct_session()
+    try:
+        r = s.get(SSE_SHARE_URL, params=p, headers=h, timeout=25)
+        r.raise_for_status()
+        rows = r.json().get("result") or []
+    finally:
+        s.close()
+    out = {}
+    for x in rows:
+        try:
+            out[x["SEC_CODE"]] = {
+                "date": x["STAT_DATE"],
+                "name": _strip(x.get("SEC_NAME")),
+                "shares": float(x["TOT_VOL"]) / 1e4,      # 万份 -> 亿份
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def fetch_szse_shares(delay=0.15, retries=4):
+    """深交所 ETF 总份额 -> {code: {date, name, shares}}，shares 单位亿份。
+
+    只能取最新一期，且必须限速：一口气打 78 页会被重置连接。
+    """
+    h = dict(HEADERS, Referer="https://www.szse.cn/")
+    s = _direct_session()
+    out, date, page, pages = {}, None, 1, 1
+    try:
+        while page <= pages:
+            got = False
+            for attempt in range(retries):
+                try:
+                    r = s.get(SZSE_SHARE_URL, params={
+                        "SHOWTYPE": "JSON", "CATALOGID": SZSE_SHARE_CATALOG,
+                        "TABKEY": "tab1", "PAGENO": str(page), "random": "0.5",
+                    }, headers=h, timeout=25)
+                    if r.status_code != 200 or not r.text.lstrip().startswith("["):
+                        raise ValueError(f"bad body {r.status_code}")
+                    tab = r.json()[0]
+                    if page == 1:
+                        date = tab["metadata"].get("subname")
+                        pages = int(tab["metadata"].get("pagecount") or 1)
+                    for x in tab["data"]:
+                        code = _strip(x.get("sys_key"))
+                        shares = _strip(x.get("dqgm")).replace(",", "")
+                        if code and shares:
+                            out[code] = {"date": date, "name": _strip(x.get("kzjcurl")),
+                                         "shares": float(shares) / 1e4}
+                    got = True
+                    break
+                except Exception:  # noqa: BLE001
+                    s.close()
+                    s = _direct_session()          # 连接被重置就换一条
+                    time.sleep(1.5 * (attempt + 1))
+            if not got:
+                raise RuntimeError(f"szse page {page} failed after {retries} tries")
+            page += 1
+            time.sleep(delay)
+    finally:
+        s.close()
+    return out
+
+
+def merge_official_shares(fetched_at: str, off: dict) -> dict:
+    """把官方份额按「数据日期」归档到 shares_official.json。
+
+    交易所给的是当日清算后份额；同一天重复跑覆盖即可。
+    返回累积后的结构，便于调用方核对。
+    """
+    store = {}
+    if os.path.exists(SHARE_PATH):
+        try:
+            store = json.load(open(SHARE_PATH, encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            store = {}
+    for code, v in off.items():
+        store.setdefault(v["date"], {})[code] = {
+            "name": v["name"], "shares": round(v["shares"], 4),
+        }
+    json.dump(store, open(SHARE_PATH, "w", encoding="utf-8"),
+              ensure_ascii=False, sort_keys=True)
+    return store
+
+
+def fetch_official_shares(codes, date=None):
+    """合并沪深官方份额，只保留池内代码。
+
+    两边数据日期可能不同（收盘清算后各自更新），逐条带上实际日期，
+    由调用方决定是否接受，不做静默对齐。
+    """
+    want = set(codes)
+    out = {}
+    for fn in (lambda: fetch_sse_shares(date), fetch_szse_shares):
+        try:
+            for k, v in fn().items():
+                if k in want:
+                    out[k] = v
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def top_movers(codes):
     """扩展观察：全市场同指数 ETF 成交额TOP（用于发现池外异常放量）。"""
     return []
@@ -229,9 +372,16 @@ def main(check_only=False):
         "pool": [],
         "degraded": [],
     }
+    # 深交所要翻 78 页（约 15s），与行情采集并行，避免拖慢整体
+    share_bg = None
+    if not check_only:
+        share_bg = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        share_future = share_bg.submit(fetch_official_shares, codes)
+
     for p in pool:
         c = p["code"]
         rec = dict(p)
+        rec["date"] = today          # 供官方份额按日期对齐
         rec.update(rt.get(c, {}))
         try:
             rec["daily"] = fetch_daily(c, 45)
@@ -244,6 +394,23 @@ def main(check_only=False):
             rec["m5"] = []
             row["degraded"].append(f"{c}:min5:{type(e).__name__}")
         row["pool"].append(rec)
+
+    # 交易所官方份额（沪深分开采集，各自带数据日期）
+    try:
+        off = share_future.result() if share_bg is not None else fetch_official_shares(codes)
+        if off:
+            merge_official_shares(today, off)
+            row["shares_source"] = {
+                d: sorted(k for k, v in off.items() if v["date"] == d)
+                for d in {v["date"] for v in off.values()}
+            }
+        else:
+            row["degraded"].append("shares:empty")
+    except Exception as e:  # noqa: BLE001
+        row["degraded"].append(f"shares:{type(e).__name__}")
+    finally:
+        if share_bg is not None:
+            share_bg.shutdown(wait=False)
 
     # 指数日K：之前 index_daily.json 没有任何采集代码更新，超额收益会长期吃旧数据
     try:

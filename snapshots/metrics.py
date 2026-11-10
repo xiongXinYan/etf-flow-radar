@@ -20,6 +20,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SNAP_DIR = os.path.join(ROOT, "snapshots")
 HIST_PATH = os.path.join(SNAP_DIR, "history.json")
 IDX_PATH = os.path.join(SNAP_DIR, "index_daily.json")
+SHARE_PATH = os.path.join(SNAP_DIR, "shares_official.json")
+_OFFICIAL: dict | None = None
 
 IDX_MAP = {
     "沪深300": "sh000300", "上证50": "sh000016", "中证1000": "sh000852",
@@ -54,13 +56,32 @@ def hhmm_of(raw: str | None, default: str = "150000") -> str:
     return digits[8:12] if len(digits) >= 12 else default
 
 
+def official_shares() -> dict:
+    """交易所官方份额：{日期: {代码: {name, shares}}}，shares 单位亿份。"""
+    global _OFFICIAL
+    if _OFFICIAL is None:
+        if os.path.exists(SHARE_PATH):
+            try:
+                _OFFICIAL = json.load(open(SHARE_PATH, encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                _OFFICIAL = {}
+        else:
+            _OFFICIAL = {}
+    return _OFFICIAL
+
+
 def shares_of(rec) -> float | None:
     """单只 ETF 的总份额（亿份）。
 
-    优先 turnover 反推：总份额 = 成交量(份) ÷ 换手率。
-    腾讯字段 45 是「成交量 × 现价」的市值，除现价只是把成交量又还原了一遍，
-    对 1.0 元附近的面值类 ETF 加权不足，且 0.001 元的价格精度会被放大。
+    优先级：交易所官方份额 > turnover 反推 > 市值/现价。
+    - 官方份额是清算后真实份额，ETF 申赎追踪应以它为准；
+    - 反推法用于官方数据缺失（如新上市、或当日尚未更新）时兜底，
+      实测 24 只样本对官方值偏差全部在 0.5% 以内。
+    - 腾讯字段 45 是「成交量 × 现价」，不是基金规模。
     """
+    off = official_shares().get(rec.get("date"), {}).get(rec.get("code", ""))
+    if off and off.get("shares"):
+        return float(off["shares"])
     tn = rec.get("turnover_rate")
     vols = rec.get("volume_shares")
     if tn and tn > 0 and vols:
@@ -189,6 +210,8 @@ def compute_row(rec, curve) -> dict:
         "pct": rec.get("pct"),
         "scale": rec.get("scale_yi"),
         "hhmm": hhmm,
+        "shares_source": "official" if (
+            official_shares().get(rec.get("date"), {}).get(rec.get("code"))) else "estimated",
     }
 
 
@@ -237,7 +260,7 @@ def build(day_key: str | None = None) -> dict:
         for r in s["pool"]:
             if r["tier"] != "focus":
                 continue
-            sh = shares_of(r)
+            sh = shares_of({**r, "date": d})
             pr = r.get("price")
             if sh and pr:
                 tot_sh += sh
