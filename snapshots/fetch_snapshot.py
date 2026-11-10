@@ -42,6 +42,14 @@ def idx_map(pool) -> dict:
     names = {p["index"] for p in pool}
     return {n: IDX_MAP[n] for n in names if n in IDX_MAP}
 
+# 日K 域名回退链。2026-11-10 实测：web.ifzq.gtimg.cn 被腾讯 WAF 拦截（501），
+# 同接口的 ifzq.gtimg.cn 正常且数据完全一致（收盘价/成交量逐项核对过）。
+# 保留多个域名，任一个被封都能自动切换。
+KLINE_HOSTS = ("ifzq.gtimg.cn", "web.ifzq.gtimg.cn")
+
+# 每次请求间隔（秒）。连续高频采集会触发 WAF，这里主动降速。
+REQUEST_GAP = 0.35
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
     "Referer": "https://finance.sina.com.cn",
@@ -55,17 +63,34 @@ def sym(code: str) -> str:
     return ("sh" if code[0] in "56" else "sz") + code
 
 
+class WAFBlocked(RuntimeError):
+    """腾讯 WAF 返回的 501 拦截页：不是网络问题，重试和换参数都无效，只能换域名。"""
+
+
+def _is_waf(resp) -> bool:
+    t = (resp.text or "")[:400]
+    return "waf.tencent.com" in t
+
+
 def get(url: str, **kw) -> requests.Response:
     last = None
     for attempt in range(3):
         try:
             r = requests.get(url, headers=HEADERS, timeout=20, **kw)
+            if _is_waf(r):
+                raise WAFBlocked(f"WAF blocked {url}")
             r.raise_for_status()
             return r
+        except WAFBlocked:
+            raise
         except Exception as e:  # noqa: BLE001
             last = e
             time.sleep(1.2 * (attempt + 1))
     raise RuntimeError(f"GET failed {url}: {last}")
+
+
+def polite_sleep():
+    time.sleep(REQUEST_GAP)
 
 
 def fetch_realtime(codes):
@@ -133,16 +158,22 @@ def fetch_daily(code, days=60):
     在发生过分红/折算的标的上会系统性偏移；成交额必须用真实成交价算。
     """
     s = sym(code)
-    u = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={s},day,,,{days},"
-    j = get(u).json()
-    d = j["data"][s]
-    k = d.get("day") or []
-    # [date, open, close, high, low, volume(手)]
-    return [
-        {"date": row[0], "open": float(row[1]), "close": float(row[2]),
-         "high": float(row[3]), "low": float(row[4]), "volume_lots": float(row[5])}
-        for row in k
-    ]
+    last = None
+    for host in KLINE_HOSTS:
+        u = f"https://{host}/appstock/app/fqkline/get?param={s},day,,,{days},"
+        try:
+            k = get(u).json()["data"][s].get("day") or []
+            # [date, open, close, high, low, volume(手)]
+            return [
+                {"date": row[0], "open": float(row[1]), "close": float(row[2]),
+                 "high": float(row[3]), "low": float(row[4]), "volume_lots": float(row[5])}
+                for row in k
+            ]
+        except WAFBlocked as e:      # 该域名被拦截，换下一个
+            last = e
+            time.sleep(0.5)
+            continue
+    raise RuntimeError(f"daily failed for {code}: {last}")
 
 
 def fetch_index_daily(codes, days=120):
@@ -355,8 +386,11 @@ def main(check_only=False):
     rt = fetch_realtime(codes)
     if check_only:
         print(f"realtime ok: {len(rt)}/{len(codes)}")
-        one = fetch_daily(codes[0], 5)
-        print("daily ok:", len(one), one[-1])
+        try:
+            one = fetch_daily(codes[0], 5)
+            print("daily ok:", len(one), one[-1] if one else None)
+        except Exception as e:  # noqa: BLE001
+            print("daily FAILED:", type(e).__name__, str(e)[:160])
         m = fetch_min5(codes[0], 40)
         print("min5 ok:", len(m))
         return
@@ -394,6 +428,7 @@ def main(check_only=False):
             rec["m5"] = []
             row["degraded"].append(f"{c}:min5:{type(e).__name__}")
         row["pool"].append(rec)
+        polite_sleep()          # 主动降速，避免连续采集触发 WAF
 
     # 交易所官方份额（沪深分开采集，各自带数据日期）
     try:

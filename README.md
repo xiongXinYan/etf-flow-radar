@@ -112,3 +112,11 @@ Operational notes, all measured:
 - SZSE resets the connection under fast sequential paging; 0.15 s spacing plus session rebuild on failure pulled all 78 pages reliably in ~16 s. It runs in a background thread alongside the quote fetch.
 - Both exchanges resolve through direct connections only. A system proxy made SZSE page reads time out.
 - Cross-check on all 24 pool ETFs: official vs estimated shares differ by at most 0.44%.
+
+## Quote endpoint failover
+
+On 2026-11-10 the daily-kline host `web.ifzq.gtimg.cn` started returning a Tencent WAF 501 page for every request, including plain `qfq` calls — while `qt.gtimg.cn` (realtime) and `ifzq.gtimg.cn/appstock/.../mkline` (5-min bars) kept working. So it was a host-level block, not a parameter or rate issue.
+
+`fetch_daily()` now walks `KLINE_HOSTS = ("ifzq.gtimg.cn", "web.ifzq.gtimg.cn")`. The WAF page is detected by the `waf.tencent.com` marker and raised as `WAFBlocked` (not retried), so a blocked host fails over immediately instead of burning three retries. Verified the substitute host byte-for-byte: same close, same volume, same `day` (unadjusted) field.
+
+`REQUEST_GAP = 0.35` seconds is inserted between ETFs. The original block was probably provoked by several back-to-back full collection runs during testing; a full run now takes ~30 s instead of ~24 s and no longer trips the WAF.
