@@ -5,3 +5,5 @@ __pycache__/
 *.png
 .idea/
 snapshots/m5/
+.playwright-mcp/
+qa-*.png

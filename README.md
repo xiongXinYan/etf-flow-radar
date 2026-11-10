@@ -159,3 +159,34 @@ F_t = Σ_i (S_{i,t} − S_{i,t−1}) × P_{i,t}
 - **Turnover baseline is quality-tagged.** `amount_quality` is `official` when every day came with a real traded amount, `estimated` when it fell back to volume × close, `mixed` otherwise.
 - **5-minute bar completeness.** A day now needs ≥20 bars in the morning and ≥20 in the afternoon with no duplicate timestamps; a bar count alone accepted sessions that were missing an entire half-day.
 - **Score is genuinely weighted.** Each factor is clamped to [-1, 1] first. Previously the ceilings were +1.6 / +1.0 / +0.8 / +0.6, so the nominal 40/25/20/15 split did not hold. `score_missing` names factors that were absent rather than silently scoring them as neutral.
+
+## Backfilling history
+
+A fresh install has one snapshot, which is not enough to compute a single day of net subscription. `backfill.py` fills that in from the two endpoints that can actually be queried backwards:
+
+```bash
+python backfill.py --days 120          # daily klines + last 60 sessions of SSE shares
+python backfill.py --check             # probe only, writes nothing
+```
+
+| Source | Reach | Notes |
+|---|---|---|
+| Eastmoney klines | Thousands of sessions | Real traded amount + adjusted price, both stored |
+| SSE shares (`STAT_DATE`) | Any past trading day | 923 ETFs per call, exact date match verified 10/10 |
+| SZSE shares | **Latest only** | Cannot be backfilled; history must accumulate daily |
+
+Measured result: 120 sessions of klines for all 24 ETFs, 54 sessions of SSE shares, **53 days with computable net subscription** (2026-08-20 → 2026-11-10).
+
+**Coverage is deliberately incomplete.** Only Shanghai-listed ETFs can have backfilled shares, so historical flow covers 13 of the 20 focus ETFs. Missing Shenzhen flows are skipped, not estimated — `flow_n` and `comparable_n` record what each day actually covers, and the dashboard says so plainly.
+
+`backfill.py` writes `snapshots/daily/`, `snapshots/index_daily.json` and `snapshots/shares_official.json`. It **does not** write `history.json`: that file records what the market looked like in real time, and splicing today's daily bars into a past session would fabricate intraday data that never existed.
+
+## First real result
+
+53 sessions of official-share flow, Shanghai-focused:
+
+- cumulative net subscription **+2935 billion CNY**
+- 38 subscription days vs 15 redemption days
+- largest single day +501.7 bn (2026-11-03), largest redemption −66.0 bn (2026-09-01)
+
+Treat this as a calibration check, not a finding: it covers 13 of 20 ETFs and only ~2.5 months.

@@ -15,6 +15,19 @@ START = "<script>window.__DATA__="
 END = ";</script>"
 
 
+def _flow_history():
+    """从官方份额回补数据算历史净申购。失败不能让整个页面挂掉。"""
+    try:
+        import flow_history
+        h = flow_history.build_flow()
+        days = [{k: d.get(k) for k in
+                 ("date", "flow", "flow_n", "official_ratio", "comparable_n", "cum_flow")}
+                for d in h["days"]]
+        return {"days": days, "meta": h["meta"]}
+    except Exception as e:  # noqa: BLE001
+        return {"days": [], "meta": {"error": type(e).__name__}}
+
+
 def build_payload():
     b = insight.enrich()
     hist = insight.metrics.load()
@@ -44,6 +57,7 @@ def build_payload():
         "session_end": b["session_end"],
         "degraded": b["degraded"],
         "judge": b["judge"],
+        "flow_history": _flow_history(),
         "agg": {
             "amount": round(b["agg"]["amount"] / 1e8, 2),
             "avg20": round((b["agg"]["avg20"] or 0) / 1e8, 2),
