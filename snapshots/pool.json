@@ -1,0 +1,146 @@
+[
+ {
+  "code": "510300",
+  "name": "沪深300ETF华泰柏瑞",
+  "index": "沪深300",
+  "tier": "focus"
+ },
+ {
+  "code": "510310",
+  "name": "沪深300ETF易方达",
+  "index": "沪深300",
+  "tier": "focus"
+ },
+ {
+  "code": "510050",
+  "name": "上证50ETF华夏",
+  "index": "上证50",
+  "tier": "focus"
+ },
+ {
+  "code": "510330",
+  "name": "沪深300ETF华夏",
+  "index": "沪深300",
+  "tier": "focus"
+ },
+ {
+  "code": "159919",
+  "name": "沪深300ETF嘉实",
+  "index": "沪深300",
+  "tier": "focus"
+ },
+ {
+  "code": "512100",
+  "name": "中证1000ETF南方",
+  "index": "中证1000",
+  "tier": "focus"
+ },
+ {
+  "code": "588080",
+  "name": "科创50ETF易方达",
+  "index": "科创50",
+  "tier": "focus"
+ },
+ {
+  "code": "159915",
+  "name": "创业板ETF易方达",
+  "index": "创业板指",
+  "tier": "focus"
+ },
+ {
+  "code": "510500",
+  "name": "中证500ETF南方",
+  "index": "中证500",
+  "tier": "focus"
+ },
+ {
+  "code": "159845",
+  "name": "中证1000ETF华夏",
+  "index": "中证1000",
+  "tier": "focus"
+ },
+ {
+  "code": "560010",
+  "name": "中证1000ETF广发",
+  "index": "中证1000",
+  "tier": "focus"
+ },
+ {
+  "code": "510180",
+  "name": "上证180ETF华安",
+  "index": "上证180",
+  "tier": "focus"
+ },
+ {
+  "code": "159629",
+  "name": "中证1000ETF富国",
+  "index": "中证1000",
+  "tier": "focus"
+ },
+ {
+  "code": "510230",
+  "name": "金融ETF国泰",
+  "index": "上证180金融",
+  "tier": "focus"
+ },
+ {
+  "code": "159922",
+  "name": "中证500ETF嘉实",
+  "index": "中证500",
+  "tier": "focus"
+ },
+ {
+  "code": "512500",
+  "name": "中证500ETF华夏",
+  "index": "中证500",
+  "tier": "focus"
+ },
+ {
+  "code": "515800",
+  "name": "中证800ETF汇添富",
+  "index": "中证800",
+  "tier": "focus"
+ },
+ {
+  "code": "159952",
+  "name": "创业板ETF广发",
+  "index": "创业板指",
+  "tier": "focus"
+ },
+ {
+  "code": "588050",
+  "name": "科创50ETF工银",
+  "index": "科创50",
+  "tier": "focus"
+ },
+ {
+  "code": "159901",
+  "name": "深证100ETF易方达",
+  "index": "深证100",
+  "tier": "focus"
+ },
+ {
+  "code": "588000",
+  "name": "科创50ETF华夏",
+  "index": "科创50",
+  "tier": "watch"
+ },
+ {
+  "code": "159338",
+  "name": "中证A500ETF国泰",
+  "index": "中证A500",
+  "tier": "watch"
+ },
+ {
+  "code": "512050",
+  "name": "A500ETF华夏",
+  "index": "中证A500",
+  "tier": "watch"
+ },
+ {
+  "code": "159339",
+  "name": "A500ETF银华",
+  "index": "中证A500",
+  "tier": "watch"
+ }
+]

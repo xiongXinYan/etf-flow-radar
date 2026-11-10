@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>国家队资金跟踪 · 宽基ETF量价透视</title>
+<style>
+:root{
+  --bg:#f3f4f1; --card:#ffffff; --ink:#14181c; --ink2:#5b6470; --ink3:#8b95a1;
+  --line:#e3e5e0; --line2:#eef0ec;
+  --up:#cf3f2f; --down:#12855a; --brand:#c8503c; --brand-soft:#fbf0ed;
+  --accent:#2f6f6a;
+  --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;font-feature-settings:"tnum";}
+.wrap{max-width:1280px;margin:0 auto;padding:0 24px 80px}
+/* ---------- top bar ---------- */
+.top{display:flex;align-items:center;justify-content:space-between;padding:22px 0 18px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:12px}
+.logo{width:26px;height:26px;border-radius:7px;background:var(--ink);display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700;transform:translateY(3px)}
+.brand h1{font-size:19px;margin:0;letter-spacing:.3px;font-weight:700}
+.brand .sub{font-size:12.5px;color:var(--ink3);letter-spacing:.2px}
+.topmeta{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink2)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--down);display:inline-block}
+.pill{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 11px;font-size:11.5px;color:var(--ink2)}
+.pill.solid{background:var(--ink);color:#fff;border-color:var(--ink)}
+/* ---------- verdict ---------- */
+.verdict{margin:22px 0 0;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px 28px;display:grid;grid-template-columns:1.15fr 1fr;gap:34px;position:relative;overflow:hidden}
+.verdict::after{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--tone,var(--ink3))}
+.eyebrow{font-size:11.5px;letter-spacing:.16em;color:var(--ink3);font-weight:600;margin-bottom:10px}
+.vtext{font-size:27px;font-weight:700;letter-spacing:-.3px;margin:0 0 12px;color:var(--tone,var(--ink))}
+.vsum{font-size:13.6px;line-height:1.85;color:var(--ink2);margin:0}
+.vsum b{color:var(--ink);font-weight:600}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line2);border-radius:12px;overflow:hidden}
+.kpi{background:#fcfcfa;padding:15px 16px}
+.kpi .k{font-size:11.5px;color:var(--ink3);margin-bottom:6px}
+.kpi .v{font-family:var(--mono);font-size:21px;font-weight:600;letter-spacing:-.4px}
+.kpi .h{font-size:11px;color:var(--ink3);margin-top:5px}
+/* ---------- section ---------- */
+.sec{margin-top:26px}
+.sechead{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.sechead h2{font-size:14px;margin:0;letter-spacing:.4px;font-weight:700}
+.sechead .note{font-size:11.5px;color:var(--ink3)}
+.line{flex:1;height:1px;background:var(--line)}
+/* judge panel */
+.judge{display:grid;grid-template-columns:repeat(3,1fr)+;grid-template-columns:repeat(3,1fr);gap:14px}
+.jcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px}
+.jcard .jt{font-size:11.5px;color:var(--ink3);letter-spacing:.08em;margin-bottom:12px;display:flex;justify-content:space-between}
+.jcard .jl{font-size:16px;font-weight:700;margin-bottom:8px}
+.jcard .jd{font-size:12.4px;color:var(--ink2);line-height:1.7}
+.scale{height:6px;border-radius:99px;background:var(--line2);position:relative;margin-top:14px}
+.scale i{position:absolute;top:-2px;width:10px;height:10px;border-radius:50%;background:var(--ink);border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+.scale .mid{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--line)}
+/* charts */
+.charts{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}
+.chart{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 12px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.chart svg{display:block;width:100%;height:auto;max-width:100%}
+.chart .ch{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.chart .ch b{font-size:13.5px}
+.chart .ch span{font-size:11px;color:var(--ink3)}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--ink2);margin:8px 0 0}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px;transform:translateY(1px)}
+svg{display:block;width:100%;overflow:visible}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:#fff;font-size:11.5px;padding:6px 9px;border-radius:6px;opacity:0;transition:opacity .12s;z-index:50;white-space:nowrap;font-family:var(--mono)}
+/* table */
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 11px;font-size:12px;color:var(--ink2);cursor:pointer;transition:.15s;font-family:inherit}
+.btn:hover{border-color:#cfd3cc;color:var(--ink)}
+.btn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.spacer{flex:1}
+.tablewrap{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12.4px;table-layout:auto}
+thead th{position:sticky;top:0;background:#fafaf7;text-align:right;font-weight:600;color:var(--ink2);
+  padding:9px 7px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:10.6px;cursor:pointer;user-select:none;z-index:2;letter-spacing:-.1px}
+thead th:first-child,tbody td:first-child{text-align:left;padding-left:16px;min-width:150px}
+th[data-k="peer_lift"],td[data-k="peer_lift"]{min-width:66px}
+th:last-child,td:last-child{min-width:86px}
+thead th.l,td.l{text-align:left}
+thead th .ind{opacity:.35;font-size:9px;margin-left:3px}
+thead th.sorted .ind{opacity:1;color:var(--brand)}
+tbody td{padding:8px 8px;border-bottom:1px solid var(--line2);text-align:right;font-family:var(--mono);white-space:nowrap;font-size:12px}
+tbody td.nm{font-family:var(--sans);font-weight:600}
+tbody td .code{font-family:var(--mono);font-size:10.5px;color:var(--ink3);font-weight:400;display:block;margin-top:2px;letter-spacing:.3px}
+tbody tr:hover{background:#fbfbf8}
+.grp td{background:#f7f7f3;font-family:var(--sans);font-size:11.5px;color:var(--ink2);font-weight:600;padding:8px 16px;text-align:left}
+.pos{color:var(--up)}.neg{color:var(--down)}.mute{color:var(--ink3)}
+.tag{display:inline-block;font-family:var(--sans);font-size:10.5px;padding:2px 6px;border-radius:5px;background:var(--line2);color:var(--ink2);margin:1px 3px 1px 0;font-weight:500;white-space:nowrap}
+.tag.hot{background:var(--brand-soft);color:var(--brand)}
+.tag.cold{background:#eef2f0;color:var(--accent)}
+.bar{height:6px;border-radius:3px;background:#e9ece7;box-shadow:inset 0 0 0 1px #dde1db;position:relative;min-width:56px;width:56px;flex:0 0 56px}
+
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;min-width:4px}
+/* notes */
+details{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:0;margin-top:14px}
+details+details{margin-top:10px}
+summary{cursor:pointer;padding:15px 20px;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"＋";color:var(--ink3);font-weight:400}
+details[open] summary::after{content:"−"}
+.body{padding:0 20px 18px;font-size:12.6px;color:var(--ink2);line-height:1.85}
+.body b{color:var(--ink)}
+.body ol,.body ul{margin:8px 0;padding-left:20px}
+.body li{margin:6px 0}
+.gap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 14px;min-width:0;overflow:hidden}
+.gaphead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.gaphead b{font-size:13.5px}.gaphead span{font-size:11px;color:var(--ink3)}
+.gapbars{display:flex;flex-direction:column;gap:6px}
+.gaprow{display:grid;grid-template-columns:132px minmax(0,1fr) 74px;align-items:center;gap:10px;font-size:11.8px}
+.gaprow .nm{color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track1{height:13px;background:#f4f5f1;border-radius:2px;position:relative;overflow:hidden}
+
+.track1 .fill{position:absolute;top:0;bottom:0;border-radius:2px}
+.gaprow .val{text-align:right;font-family:var(--mono);font-size:11.5px}
+.strip{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.stripitem{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;display:flex;align-items:baseline;gap:12px}
+.stripitem .k{font-size:11.5px;color:var(--ink3);white-space:nowrap}
+.stripitem .v{font-size:12.6px;color:var(--ink2);line-height:1.6}
+.warn{background:#fdf7ee;border:1px solid #f0e2c8;color:#7a5c22;border-radius:10px;padding:12px 14px;font-size:12.3px;line-height:1.75;margin-top:12px}
+.tfoot{font-size:11px;color:var(--ink3);line-height:1.85;padding:12px 16px 2px;border-top:1px solid var(--line2);background:#fcfcfa}
+.tfoot b{color:var(--ink2)}
+.foot{font-size:11px;color:var(--ink3);margin-top:24px;line-height:1.8;border-top:1px solid var(--line);padding-top:16px}
+@media(max-width:900px){.strip{grid-template-columns:1fr}.verdict{grid-template-columns:1fr;gap:20px}.judge{grid-template-columns:1fr}.charts{grid-template-columns:1fr}}
+</style>
+<script>window.__DATA__={"day":"2026-11-10","generated_at":"2026-11-10 22:26:37","session_end":true,"degraded":[],"judge":{"score":-1.21,"verdict":"偏弱：有卖出迹象","tone":"sell-mild","fund":{"level":"out","label":"主动卖盘占优","detail":"合计主动净买入 -32.4 亿"},"vol":{"level":"light","label":"偏冷"},"excess_med":0.05,"notes":["量价同向偏弱：缩量下的净卖出更像存量博弈的自然滑落，而不是有组织的减仓——但也没有任何买入力量接盘。","ETF 相对跟踪指数的超额中位数仅 +0.05%，价格基本由指数带动，资金没有在 ETF 层面额外定价。","单一交易日的缩量/平量不能推翻长期判断：真正的集中买入通常伴随连续 2—3 个交易日的量能抬升与份额同向变动，建议按周观察而非盯单日。"]},"agg":{"amount":352.13,"avg20":536.8,"mult":0.66,"active_net":-32.37,"scale":8432.3,"pct":0.48,"count":20},"rows":[{"code":"510300","name":"沪深300ETF华泰柏瑞","index":"沪深300","tier":"focus","price":4.135,"pct":0.12,"scale":1929.7,"amount":49.83,"avg20":87.5,"mult":0.57,"active_net":-12.08,"shares":466.7,"share_chg":null,"share_delta":null,"excess":{"d1":0.17,"d5":-0.08,"d20":0.35},"peer_mult_med":0.4,"peer_lift":1.42,"peer_n":4,"tags":["平量","主动卖"],"hhmm":"1614"},{"code":"510310","name":"沪深300ETF易方达","index":"沪深300","tier":"focus","price":4.018,"pct":0.07,"scale":1051.5,"amount":11.66,"avg20":35.59,"mult":0.33,"active_net":-3.54,"shares":261.7,"share_chg":null,"share_delta":null,"excess":{"d1":0.05,"d5":-0.02,"d20":0.28},"peer_mult_med":0.4,"peer_lift":0.82,"peer_n":4,"tags":["缩量","主动卖"],"hhmm":"1614"},{"code":"510050","name":"上证50ETF华夏","index":"上证50","tier":"focus","price":2.891,"pct":-0.62,"scale":481.1,"amount":13.17,"avg20":34.23,"mult":0.38,"active_net":-2.49,"shares":166.4,"share_chg":null,"share_delta":null,"excess":{"d1":-0.07,"d5":0.04,"d20":0.3},"peer_mult_med":0.38,"peer_lift":1.0,"peer_n":1,"tags":["缩量"],"hhmm":"1614"},{"code":"510330","name":"沪深300ETF华夏","index":"沪深300","tier":"focus","price":4.312,"pct":0.09,"scale":675.5,"amount":6.2,"avg20":19.06,"mult":0.33,"active_net":-0.81,"shares":156.7,"share_chg":null,"share_delta":null,"excess":{"d1":-0.03,"d5":-0.36,"d20":0.02},"peer_mult_med":0.4,"peer_lift":0.82,"peer_n":4,"tags":["缩量"],"hhmm":"1614"},{"code":"159919","name":"沪深300ETF嘉实","index":"沪深300","tier":"focus","price":4.316,"pct":0.05,"scale":604.7,"amount":11.55,"avg20":24.49,"mult":0.47,"active_net":-2.75,"shares":140.1,"share_chg":null,"share_delta":null,"excess":{"d1":0.07,"d5":-0.13,"d20":0.24},"peer_mult_med":0.4,"peer_lift":1.17,"peer_n":4,"tags":["缩量"],"hhmm":"1614"},{"code":"512100","name":"中证1000ETF南方","index":"中证1000","tier":"focus","price":2.672,"pct":1.06,"scale":521.2,"amount":37.48,"avg20":51.99,"mult":0.72,"active_net":-2.35,"shares":195.1,"share_chg":null,"share_delta":null,"excess":{"d1":-0.24,"d5":-0.43,"d20":-0.06},"peer_mult_med":1.02,"peer_lift":0.71,"peer_n":4,"tags":["平量"],"hhmm":"1614"},{"code":"588080","name":"科创50ETF易方达","index":"科创50","tier":"focus","price":1.298,"pct":0.85,"scale":437.5,"amount":22.74,"avg20":23.62,"mult":0.96,"active_net":3.04,"shares":337.0,"share_chg":null,"share_delta":null,"excess":{"d1":0.37,"d5":0.48,"d20":0.34},"peer_mult_med":0.815,"peer_lift":1.18,"peer_n":2,"tags":["平量","主动买","跑赢基准"],"hhmm":"1614"},{"code":"159915","name":"创业板ETF易方达","index":"创业板指","tier":"focus","price":2.509,"pct":1.5,"scale":1150.7,"amount":87.58,"avg20":122.62,"mult":0.71,"active_net":-2.07,"shares":458.6,"share_chg":null,"share_delta":null,"excess":{"d1":0.08,"d5":0.16,"d20":0.08},"peer_mult_med":0.71,"peer_lift":1.0,"peer_n":2,"tags":["平量"],"hhmm":"1614"},{"code":"510500","name":"中证500ETF南方","index":"中证500","tier":"focus","price":6.67,"pct":0.88,"scale":652.1,"amount":33.5,"avg20":51.73,"mult":0.65,"active_net":-7.97,"shares":97.8,"share_chg":null,"share_delta":null,"excess":{"d1":-0.03,"d5":-0.49,"d20":0.02},"peer_mult_med":0.73,"peer_lift":0.89,"peer_n":3,"tags":["平量","主动卖"],"hhmm":"1614"},{"code":"159845","name":"中证1000ETF华夏","index":"中证1000","tier":"focus","price":2.744,"pct":1.11,"scale":107.9,"amount":27.7,"avg20":24.53,"mult":1.13,"active_net":-1.51,"shares":39.3,"share_chg":null,"share_delta":null,"excess":{"d1":-0.27,"d5":-0.37,"d20":-0.04},"peer_mult_med":1.02,"peer_lift":1.11,"peer_n":4,"tags":["小幅放量"],"hhmm":"1614"},{"code":"560010","name":"中证1000ETF广发","index":"中证1000","tier":"focus","price":2.743,"pct":1.22,"scale":107.7,"amount":15.39,"avg20":15.35,"mult":1.0,"active_net":-0.41,"shares":39.3,"share_chg":null,"share_delta":null,"excess":{"d1":-0.12,"d5":-0.25,"d20":-0.04},"peer_mult_med":1.02,"peer_lift":0.98,"peer_n":4,"tags":["平量"],"hhmm":"1614"},{"code":"510180","name":"上证180ETF华安","index":"上证180","tier":"focus","price":3.684,"pct":-0.3,"scale":163.9,"amount":0.59,"avg20":0.78,"mult":0.76,"active_net":-0.1,"shares":44.5,"share_chg":null,"share_delta":null,"excess":{"d1":-0.13,"d5":-0.1,"d20":0.26},"peer_mult_med":0.76,"peer_lift":1.0,"peer_n":1,"tags":["平量"],"hhmm":"1614"},{"code":"159629","name":"中证1000ETF富国","index":"中证1000","tier":"focus","price":2.754,"pct":1.29,"scale":32.6,"amount":6.77,"avg20":6.52,"mult":1.04,"active_net":-0.83,"shares":11.9,"share_chg":null,"share_delta":null,"excess":{"d1":0.06,"d5":-0.16,"d20":0.06},"peer_mult_med":1.02,"peer_lift":1.02,"peer_n":4,"tags":["平量"],"hhmm":"1614"},{"code":"510230","name":"金融ETF国泰","index":"上证180金融","tier":"focus","price":1.366,"pct":0.07,"scale":7.3,"amount":1.04,"avg20":1.16,"mult":0.9,"active_net":-0.09,"shares":5.4,"share_chg":null,"share_delta":null,"excess":{},"peer_mult_med":0.9,"peer_lift":1.0,"peer_n":1,"tags":["平量"],"hhmm":"1614"},{"code":"159922","name":"中证500ETF嘉实","index":"中证500","tier":"focus","price":2.708,"pct":0.93,"scale":97.6,"amount":4.88,"avg20":5.73,"mult":0.85,"active_net":1.58,"shares":36.1,"share_chg":null,"share_delta":null,"excess":{"d1":0.1,"d5":-0.0,"d20":0.1},"peer_mult_med":0.73,"peer_lift":1.16,"peer_n":3,"tags":["平量"],"hhmm":"1615"},{"code":"512500","name":"中证500ETF华夏","index":"中证500","tier":"focus","price":3.778,"pct":0.75,"scale":77.8,"amount":3.85,"avg20":5.26,"mult":0.73,"active_net":-0.04,"shares":20.6,"share_chg":null,"share_delta":null,"excess":{"d1":-0.11,"d5":-0.13,"d20":0.04},"peer_mult_med":0.73,"peer_lift":1.0,"peer_n":3,"tags":["平量"],"hhmm":"1614"},{"code":"515800","name":"中证800ETF汇添富","index":"中证800","tier":"focus","price":1.127,"pct":0.18,"scale":46.5,"amount":0.76,"avg20":1.11,"mult":0.69,"active_net":0.07,"shares":41.2,"share_chg":null,"share_delta":null,"excess":{"d1":0.15,"d5":0.4,"d20":0.65},"peer_mult_med":0.69,"peer_lift":1.0,"peer_n":1,"tags":["平量"],"hhmm":"1614"},{"code":"159952","name":"创业板ETF广发","index":"创业板指","tier":"focus","price":1.524,"pct":1.46,"scale":162.2,"amount":12.28,"avg20":17.34,"mult":0.71,"active_net":0.6,"shares":106.5,"share_chg":null,"share_delta":null,"excess":{"d1":0.01,"d5":0.02,"d20":-0.03},"peer_mult_med":0.71,"peer_lift":1.0,"peer_n":2,"tags":["平量"],"hhmm":"1614"},{"code":"588050","name":"科创50ETF工银","index":"科创50","tier":"focus","price":1.298,"pct":0.62,"scale":88.5,"amount":2.91,"avg20":4.34,"mult":0.67,"active_net":-0.17,"shares":68.2,"share_chg":null,"share_delta":null,"excess":{"d1":0.13,"d5":0.57,"d20":0.28},"peer_mult_med":0.815,"peer_lift":0.82,"peer_n":2,"tags":["平量"],"hhmm":"1614"},{"code":"159901","name":"深证100ETF易方达","index":"深证100","tier":"focus","price":2.846,"pct":0.67,"scale":36.0,"amount":2.26,"avg20":3.85,"mult":0.59,"active_net":-0.44,"shares":12.7,"share_chg":null,"share_delta":null,"excess":{"d1":0.1,"d5":0.05,"d20":0.17},"peer_mult_med":0.59,"peer_lift":1.0,"peer_n":1,"tags":["平量"],"hhmm":"1614"},{"code":"588000","name":"科创50ETF华夏","index":"科创50","tier":"watch","price":1.337,"pct":0.75,"scale":1439.3,"amount":72.2,"avg20":120.69,"mult":0.6,"active_net":-6.38,"shares":1076.5,"share_chg":null,"share_delta":null,"excess":{"d1":0.34,"d5":0.41,"d20":0.28},"peer_mult_med":null,"peer_lift":null,"peer_n":null,"tags":["平量","主动卖"],"hhmm":"1614"},{"code":"159338","name":"中证A500ETF国泰","index":"中证A500","tier":"watch","price":1.055,"pct":0.19,"scale":325.7,"amount":55.32,"avg20":46.0,"mult":1.2,"active_net":-4.05,"shares":308.7,"share_chg":null,"share_delta":null,"excess":{"d1":-0.04,"d5":-0.15,"d20":0.13},"peer_mult_med":null,"peer_lift":null,"peer_n":null,"tags":["小幅放量","主动卖"],"hhmm":"1614"},{"code":"512050","name":"A500ETF华夏","index":"中证A500","tier":"watch","price":1.053,"pct":0.29,"scale":197.3,"amount":8.72,"avg20":12.7,"mult":0.69,"active_net":0.15,"shares":187.3,"share_chg":null,"share_delta":null,"excess":{"d1":0.05,"d5":0.05,"d20":0.21},"peer_mult_med":null,"peer_lift":null,"peer_n":null,"tags":["平量"],"hhmm":"1614"},{"code":"159339","name":"A500ETF银华","index":"中证A500","tier":"watch","price":1.067,"pct":0.19,"scale":20.3,"amount":0.31,"avg20":0.56,"mult":0.56,"active_net":-0.05,"shares":19.0,"share_chg":null,"share_delta":null,"excess":{"d1":-0.04,"d5":0.02,"d20":0.11},"peer_mult_med":null,"peer_lift":null,"peer_n":null,"tags":["平量"],"hhmm":"1614"}],"share_series":[{"date":"2026-11-10","shares":2705.5719871143056,"index":100.0,"delta":null}],"timeseries":[{"date":"2026-11-10","amount":352.13,"mult":0.71}],"thresholds":{"mult_strong":1.8,"mult_mild":1.3,"active_strong":3000000000.0,"share_strong":10.0},"by_index":[{"index":"创业板指","amount":99.86,"avg20":139.96,"net":-1.48,"n":2,"mult":0.71},{"index":"中证1000","amount":87.33,"avg20":98.39,"net":-5.1,"n":4,"mult":0.89},{"index":"沪深300","amount":79.24,"avg20":166.64,"net":-19.18,"n":4,"mult":0.48},{"index":"中证500","amount":42.22,"avg20":62.72,"net":-6.43,"n":3,"mult":0.67},{"index":"科创50","amount":25.65,"avg20":27.96,"net":2.86,"n":2,"mult":0.92},{"index":"上证50","amount":13.17,"avg20":34.23,"net":-2.49,"n":1,"mult":0.38},{"index":"深证100","amount":2.26,"avg20":3.85,"net":-0.44,"n":1,"mult":0.59},{"index":"上证180金融","amount":1.04,"avg20":1.16,"net":-0.09,"n":1,"mult":0.9},{"index":"中证800","amount":0.76,"avg20":1.11,"net":0.07,"n":1,"mult":0.68},{"index":"上证180","amount":0.59,"avg20":0.78,"net":-0.1,"n":1,"mult":0.76}],"intraday":[{"t":"0935","pct":11.05},{"t":"0940","pct":4.85},{"t":"0945","pct":3.3},{"t":"0950","pct":2.51},{"t":"0955","pct":2.31},{"t":"1000","pct":2.71},{"t":"1005","pct":2.1},{"t":"1010","pct":1.79},{"t":"1015","pct":1.79},{"t":"1020","pct":1.55},{"t":"1025","pct":1.62},{"t":"1030","pct":2.57},{"t":"1035","pct":2.2},{"t":"1040","pct":1.79},{"t":"1045","pct":1.12},{"t":"1050","pct":0.99},{"t":"1055","pct":0.95},{"t":"1100","pct":1.18},{"t":"1105","pct":1.43},{"t":"1110","pct":0.99},{"t":"1115","pct":1.53},{"t":"1120","pct":1.0},{"t":"1125","pct":1.07},{"t":"1130","pct":1.41},{"t":"1305","pct":2.15},{"t":"1310","pct":1.19},{"t":"1315","pct":1.29},{"t":"1320","pct":1.49},{"t":"1325","pct":3.55},{"t":"1330","pct":1.96},{"t":"1335","pct":1.58},{"t":"1340","pct":1.19},{"t":"1345","pct":1.04},{"t":"1350","pct":1.53},{"t":"1355","pct":1.18},{"t":"1400","pct":0.93},{"t":"1405","pct":1.56},{"t":"1410","pct":1.77},{"t":"1415","pct":1.63},{"t":"1420","pct":1.65},{"t":"1425","pct":1.75},{"t":"1430","pct":1.98},{"t":"1435","pct":2.44},{"t":"1440","pct":2.52},{"t":"1445","pct":2.13},{"t":"1450","pct":3.62},{"t":"1455","pct":3.42},{"t":"1500","pct":2.61}]};</script>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand">
+      <div class="logo">⌁</div>
+      <div>
+        <h1>国家队资金跟踪</h1>
+        <div class="sub">宽基 ETF 量能 · 份额 · 超额收益三维透视</div>
+      </div>
+    </div>
+    <div class="topmeta">
+      <span class="pill" id="snapdate">—</span>
+      <span class="pill solid" id="status">数据加载中</span>
+    </div>
+  </div>
+
+  <!-- verdict -->
+  <div class="verdict" id="verdict">
+    <div>
+      <div class="eyebrow">今日判读 · <span id="eyebrowDate"></span></div>
+      <h2 class="vtext" id="vtext">—</h2>
+      <p class="vsum" id="vsum"></p>
+    </div>
+    <div class="kpis" id="kpis"></div>
+  </div>
+
+  <!-- 三维判读 -->
+  <div class="sec">
+    <div class="sechead"><h2>三维判读</h2><span class="note">把「钱」「量」「价」拆开看，避免用单一指标下结论</span><div class="line"></div></div>
+    <div class="judge" id="judge"></div>
+  </div>
+
+  <!-- 图表 -->
+  <div class="sec">
+    <div class="sechead"><h2>结构拆解</h2><span class="note">左：按跟踪指数拆量能　右：池内成交额的盘中分布</span><div class="line"></div></div>
+    <div class="charts">
+      <div class="chart">
+        <div class="ch"><b>各跟踪指数的量能对比</b><span>亿元 · 条为今日成交额，深色竖线为 20 日均额</span></div>
+        <div class="legend">
+          <span><i style="background:#9fada4"></i>今日成交额（&lt;1×）</span>
+          <span><i style="background:var(--brand)"></i>今日成交额（&gt;1×）</span>
+          <span><i style="background:#9a857c;width:3px"></i>20 日均额位置</span>
+        </div>
+        <svg id="chartIndex" viewBox="0 0 640 250" style="overflow:visible"></svg>
+        <div class="legend" id="indexNote"></div>
+      </div>
+      <div class="chart">
+        <div class="ch"><b>盘中成交额分布</b><span>池内合计 · 每 5 分钟占全天比重</span></div>
+        <div class="legend">
+          <span><i style="background:#cfd6d2"></i>盘中各 5 分钟</span>
+          <span><i style="background:var(--brand)"></i>收盘集合竞价（14:55–15:00）</span>
+        </div>
+        <svg id="chartIntra" viewBox="0 0 520 250"></svg>
+        <div class="legend" id="intraNote"></div>
+      </div>
+    </div>
+    <div class="gap" style="margin-top:14px">
+      <div class="gaphead"><b>今日成交额缺口的来源</b><span>条长 = |今日成交额 − 20日均额| ÷ 最大缺口 · 数值为差额</span></div>
+      <div class="gapbars" id="gapBars"></div>
+      <div class="legend" id="volNote2"></div>
+    </div>
+    <div class="strip" style="margin-top:14px">
+      <div class="stripitem"><span class="k">估算份额</span><span class="v" id="shareNote2">—</span></div>
+    </div>
+  </div>
+
+  <!-- 表格 -->
+  <div class="sec">
+    <div class="sechead"><h2>成分 ETF 明细</h2><span class="note">点击表头排序 · 标签由规则自动生成</span><div class="line"></div></div>
+    <div class="toolbar">
+      <button class="btn on" data-tier="focus">重点关注</button>
+      <button class="btn" data-tier="watch">扩展观察</button>
+      <button class="btn" data-tier="all">全部</button>
+      <div class="spacer"></div>
+      <span class="pill" id="rowcount"></span>
+    </div>
+    <div class="tablewrap">
+      <table id="tbl">
+        <thead><tr>
+          <th class="l" data-k="name">ETF / 跟踪指数</th>
+          <th data-k="mult">放量<span class="ind">▼</span></th>
+          <th data-k="amount">成交额(亿)<span class="ind">▼</span></th>
+          <th data-k="avg20">20日均额(亿)<span class="ind">▼</span></th>
+          <th data-k="active_net">主动净买(亿)<span class="ind">▼</span></th>
+          <th data-k="pct">涨跌<span class="ind">▼</span></th>
+          <th data-k="ex1">超额(d1)<span class="ind">▼</span></th>
+          <th data-k="peer_lift">同指数相对量<span class="ind">▼</span></th>
+          <th data-k="shares">份额(亿份)<span class="ind">▼</span></th>
+          <th data-k="scale">规模(亿)<span class="ind">▼</span></th>
+          <th class="l">动作标签</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="tfoot">
+        <b>列说明</b>　放量 = 同时点成交额 ÷（20日均额 × 历史同时点完成比例）；主动净买 = (外盘−内盘)/(外盘+内盘) × 成交额，仅逐笔方向推算；
+        超额 = ETF 涨跌 − 跟踪指数涨跌；同指数相对量 = 本只倍数 ÷ 同指数中位数，&gt;1 表示比同门更活跃；份额 = 行情规模 ÷ 现价（推算值，非基金公司披露）。
+      </div>
+    </div>
+  </div>
+
+  <!-- 口径 -->
+  <div class="sec">
+    <div class="sechead"><h2>口径与优化说明</h2><div class="line"></div></div>
+
+    <details open>
+      <summary>这一版相比常见做法，改了什么</summary>
+      <div class="body">
+        <ol>
+          <li><b>不再用「主动净买入」冠以「国家队买入」。</b> 主动买卖是逐笔成交方向（外盘／内盘）的推算，ETF 一二级市场套利会对冲出反向成交，把信号稀释甚至翻转。它最多说明「二级市场此刻买方更急」，不说明买方是谁。</li>
+          <li><b>把份额符号当成硬证据，把金额当成软证据。</b> 份额变化的符号（申购／赎回）是相对确定的，不确定的只是「谁在申赎」。所以本页用份额方向确认「有没有钱进出」，用主动净买入只做辅助。</li>
+          <li><b>加了「超额收益」维度。</b> ETF 涨跌大部分由跟踪指数决定。用 ETF 涨跌减指数涨跌得到残差：<b>份额增加 + 超额为正</b>才是「真加仓」；<b>份额增加 + 超额为负</b>是「只接盘、不抬价」，这在历史上更常见于被动配置。</li>
+          <li><b>加了「同指数相对量」。</b> 同一指数下多只 ETF 同时放量，更像被动或套利需求；只有一只明显放量，才更像有明确意图的主动买。表格里用「本只倍数 ÷ 同指数中位数」给出。</li>
+          <li><b>结论从硬阈值改为连续打分。</b> 参考做法是「倍数 1.8 倍以上就算上班」，门槛太脆。这里用 5 个因子加权（量能、主动盘、份额变化、超额、涨跌）得到 −5 到 +5 的分数，再分档，阈值仍全部写在代码里可调。</li>
+          <li><b>同时点对齐贯穿全流程。</b> 盘中任何时点都用「20日均额 × 该标的此刻历史平均走完比例」做分母，避免拿半天成交额除以全天均额得出荒谬的倍数。</li>
+        </ol>
+      </div>
+    </details>
+
+    <details>
+      <summary>每个数字怎么算的</summary>
+      <div class="body">
+        <ul>
+          <li><b>放量倍数</b> = 当日累计成交额 ÷ （20日均额 × 同时点历史平均完成比例）。收盘后完成比例为 1，即直接除以 20 日均额。20 日均额 = 新浪/腾讯日K成交量 × 100 × 当日收盘价，取今日之前的 20 个交易日。</li>
+          <li><b>主动净买入</b> = (外盘 − 内盘) ÷ (外盘 + 内盘) × 成交额。不含大宗交易与协议转让。</li>
+          <li><b>估算份额</b> = 行情口径规模 ÷ 现价。这是<b>推算值</b>：规模本身是「价格 × 份额」的行情口径，非净值口径。份额日变化 × 现价 = 申赎市值估算，需要连续两个交易日快照才有值。</li>
+          <li><b>加仓指数</b> = 100 × 当日池内总份额 ÷ 区间首日总份额。只刻画方向与幅度，不做持仓比例锚定——定期报告已不再披露前十大持有人，期初持仓不可验证。</li>
+          <li><b>超额收益</b> = ETF 区间涨跌 − 跟踪指数区间涨跌，按交易日对齐后计算。</li>
+          <li><b>同指数相对量</b> = 本只放量倍数 ÷ 同指数其他 ETF 放量倍数中位数。&gt;1 表示这只比同门更活跃。</li>
+        </ul>
+      </div>
+    </details>
+
+    <details>
+      <summary>为什么这张表越来越难做准（重要）</summary>
+      <div class="body">
+        <p>汇金持仓名单的依据是 <b>2025 年报前十大持有人</b>，那是最后一次公开实名披露。证监会 2026-03-13 发布的《公开募集证券投资基金信息披露内容与格式准则第2号—定期报告的内容与格式》自 <b>2026-05-01</b> 起施行，删除了上市基金列示前十名持有人的强制条款；2026 年中报、三季报均已不再披露，只剩匿名的「单一投资者占比≥20%」提示。</p>
+        <div class="warn">因此：本页名单只是「历史上买过」的静态标签，不是当前持仓。窗口打开时也可能有收敛，但看不到。</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>更新方式</summary>
+      <div class="body">
+        <p>数据全部落在本地 <code>snapshots/</code>，页面只读 <code>data.json</code>，不依赖任何服务：</p>
+        <ul>
+          <li><code>python snapshots/fetch_snapshot.py</code>　拉取 24 只 ETF 的实时行情、45 日日K、320 根 5 分钟K，写入当日快照（盘中可重复运行，覆盖当日）。</li>
+          <li><code>python snapshots/export_data.py</code>　重算指标并生成 <code>data.json</code>。</li>
+          <li>想重建历史，就每天跑一次这两条命令；份额变化和加仓指数会随快照累积自动变长。</li>
+        </ul>
+        <p>阈值全部集中在 <code>snapshots/insight.py</code> 的 <code>TH</code> 字典里。</p>
+      </div>
+    </details>
+
+    <div class="foot">
+      数据来源：腾讯行情（qt.gtimg.cn）实时与日K · 腾讯 5 分钟K（日内成交额分布）· 跟踪指数日K（腾讯）。名单口径：Wind 2025 年报前十大持有人（2026-05-01 起停止披露，此后不可验证）。<br>
+      「国家队」为市场俗称，非官方表述。本页所有结论均基于公开行情的量价特征推测，不能证明任何机构当日是否交易。仅供内部研究，不构成投资建议。
+    </div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const fmt=(v,d=2)=>v==null?"—":v.toFixed(d);
+const sgn=(v,d=2)=>v==null?"—":(v>0?"+":"")+v.toFixed(d);
+function niceStep(r){const p=Math.pow(10,Math.floor(Math.log10(Math.max(r,1e-9))));const n=r/p;
+  const m=n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10;return m*p;}
+const cls=v=>v==null?"mute":v>0?"pos":v<0?"neg":"mute";
+const tipEl=document.getElementById("tip");
+function showTip(e,t){tipEl.textContent=t;tipEl.style.opacity=1;tipEl.style.left=(e.clientX+12)+"px";tipEl.style.top=(e.clientY-28)+"px";}
+function hideTip(){tipEl.style.opacity=0;}
+
+let DATA=null, sortKey="mult", sortDir=1, tierFilter="focus";
+
+// 数据内嵌（由 snapshots/export_data.py 注入）。双击打开也能用，不再依赖 fetch 与本地服务。
+if (window.__DATA__) { DATA = window.__DATA__; render(); }
+else {
+  fetch("data.json?t="+Date.now()).then(r=>r.json())
+    .then(d=>{DATA=d;render();})
+    .catch(()=>{document.getElementById("status").textContent="数据未内嵌，且无法读取 data.json";});
+}
+
+function render(){
+  document.getElementById("snapdate").textContent="交易日 "+DATA.day;
+  document.getElementById("status").textContent=DATA.session_end?"已收盘 · 收盘复盘":"盘中 · 同时点对齐";
+  document.getElementById("eyebrowDate").textContent=DATA.day;
+  renderVerdict(); renderJudge(); renderIndex(); renderIntra(); renderVol(); renderShare(); renderTable();
+}
+
+function renderVerdict(){
+  const j=DATA.judge, a=DATA.agg;
+  const tone={"buy-strong":"var(--up)","buy-mild":"#c96a3a","flat":"#5b6470","sell-mild":"#3f8a6a","sell-strong":"var(--down)"}[j.tone]||"#5b6470";
+  document.getElementById("verdict").style.setProperty("--tone",tone);
+  document.getElementById("vtext").textContent=j.verdict;
+  document.getElementById("vtext").style.color=tone;
+  document.getElementById("vsum").innerHTML=(j.notes[0]||"");
+  const kpi=[
+    ["同时点放大倍数",fmt(a.mult)+"×",`20日均额 ${fmt(a.avg20)} 亿 · 强信号阈值 ${DATA.thresholds.mult_strong}×`,""],
+    ["池内合计成交额",fmt(a.amount)+" 亿",`${a.count} 只重点关注 ETF`,""],
+    ["合计主动净买入",sgn(a.active_net)+" 亿","逐笔方向推算，非申赎净流入",cls(a.active_net)],
+    ["规模加权涨跌",sgn(a.pct)+"%",`合计规模 ${fmt(a.scale,0)} 亿`,cls(a.pct)],
+  ];
+  document.getElementById("kpis").innerHTML=kpi.map(([k,v,h,c])=>
+    `<div class="kpi"><div class="k">${k}</div><div class="v ${c}">${v}</div><div class="h">${h}</div></div>`).join("");
+}
+
+function renderJudge(){
+  const j=DATA.judge;
+  const scorePos=(j.score+5)/10*100;
+  const cards=[
+    {t:"资金面 · 钱",l:j.fund.label,d:j.fund.detail+"。方向可信，归属不可信——无法确认交易方是谁。"},
+    {t:"量能 · 量",l:j.vol.label,d:`同时点倍数 ${fmt(DATA.agg.mult)}×，20 日均额 ${fmt(DATA.agg.avg20)} 亿。缩量意味着分歧下降，放量意味着有人在主动成交。`},
+    {t:"价格面 · 价",l:j.excess_med==null?"—":(Math.abs(j.excess_med)<0.2?"基本跟随指数":(j.excess_med>0?"跑赢基准":"跑输基准")),
+     d:j.excess_med==null?"缺少指数数据。":`相对跟踪指数的超额中位数 ${sgn(j.excess_med)}%。超额为正且份额增加，才是「抬价式加仓」。`},
+  ];
+  document.getElementById("judge").innerHTML=cards.map(c=>`
+    <div class="jcard"><div class="jt"><span>${c.t}</span></div>
+      <div class="jl">${c.l}</div><div class="jd">${c.d}</div></div>`).join("")+
+    `<div class="jcard" style="grid-column:1/-1;display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+      <div style="flex:0 0 auto"><div class="jt"><span>综合打分</span></div>
+        <div class="jl" style="margin:0">${sgn(j.score,2)} <span style="font-size:12px;color:var(--ink3);font-weight:400">/ ±5</span></div></div>
+      <div style="flex:1;min-width:260px">
+        <div class="scale"><div class="mid"></div><i style="left:calc(${scorePos}% - 5px)"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink3);margin-top:7px">
+          <span>−5 集中卖出</span><span>0 中性</span><span>+5 集中买入</span></div>
+      </div>
+      <div style="flex:1.4;min-width:280px;font-size:12.2px;color:var(--ink2);line-height:1.7">
+        ${j.notes.slice(1).map(n=>"· "+n).join("<br>")}
+      </div>
+    </div>`;
+}
+
+/* ---------------- 各指数量能：成交额条 + 均额刻度 ---------------- */
+function renderIndex(){
+  const svg=document.getElementById("chartIndex");
+  let d=DATA.by_index||[];
+  if(!d.length){svg.innerHTML="";return;}
+  // 成交额过小的指数合并为"其他"，保证每根条可辨
+  const TH_SMALL=8;
+  const tail=d.filter(x=>x.amount<TH_SMALL);
+  if(tail.length>1){
+    const A=tail.reduce((a,x)=>a+x.amount,0), G=tail.reduce((a,x)=>a+x.avg20,0);
+    d=d.filter(x=>x.amount>=TH_SMALL).concat([{
+      index:`其他 ${tail.length} 只`, amount:+A.toFixed(2), avg20:+G.toFixed(2),
+      n:tail.reduce((a,x)=>a+x.n,0), net:tail.reduce((a,x)=>a+x.net,0),
+      mult:+(A/G).toFixed(2)}]);
+  }
+  const W=640,H=250,L=92,R=54,T=10,B=26;
+  const max=Math.max(...d.map(x=>Math.max(x.amount,x.avg20)))*1.02;
+  const rowH=(H-T-B)/d.length;
+  const x=v=>L+(W-L-R)*(v/max);
+  let s="";
+  [0,.25,.5,.75,1].forEach(f=>{
+    const px=x(max*f);
+    s+=`<line x1="${px}" x2="${px}" y1="${T}" y2="${H-B}" stroke="#eff1ed"/>`;
+    s+=`<text x="${px}" y="${H-B+14}" text-anchor="middle" font-size="8.6" fill="#b9c0b8">${Math.round(max*f)}</text>`;
+  });
+  d.forEach((it,idx)=>{
+    const cy=T+rowH*idx+rowH/2, bh=Math.min(15,rowH*0.5);
+    const up=(it.mult||0)>=1;
+    const bx=x(it.amount), ax=x(it.avg20);
+    s+=`<text x="${L-9}" y="${cy+3.6}" text-anchor="end" font-size="10.2" fill="#3d454d">${it.index.replace("上证180金融","180金融")}</text>`;
+    s+=`<rect x="${L}" y="${cy-bh/2}" width="${Math.max(3,bx-L)}" height="${bh}" rx="2"
+      fill="${up?"var(--brand)":"#9fada4"}"
+      onmouseover="showTip(event,'${it.index}　${it.n} 只　今日 ${fmt(it.amount,1)} 亿　20日均 ${fmt(it.avg20,1)} 亿　倍数 ${fmt(it.mult)}×')" onmouseout="hideTip()"/>`;
+    // 缺口段：成交额条 → 20日均额位置，同高度浅色块（不是线）
+    if(ax>bx+1){
+      s+=`<line x1="${bx}" x2="${ax}" y1="${cy}" y2="${cy}" stroke="#cbb6ae" stroke-width="2.2"/>`;
+    }
+    // 均额位置：短竖线封口，高度略高于条形
+    s+=`<line x1="${ax}" x2="${ax}" y1="${cy-5.5}" y2="${cy+5.5}" stroke="#7d6a62" stroke-width="1.6"/>`;
+    s+=`<text x="${W-R+8}" y="${cy+3.6}" font-size="9.6" font-weight="600" fill="${up?"var(--brand)":"#98a19a"}">${fmt(it.mult)}×</text>`;
+  });
+  svg.innerHTML=s;
+  const weak=d.filter(v=>v.mult&&v.mult<1).map(v=>v.index.replace("上证180金融","180金融"));
+  document.getElementById("indexNote").innerHTML=`<span class="mute">低于 1×（缩量）：${weak.join("、")}</span>`;
+}
+
+/* ---------------- 盘中分布 ---------------- */
+function mins(t){
+  const h=+t.slice(0,2), m=+t.slice(2);
+  const cur=h*60+m;
+  if(cur<=11*60+30) return cur-(9*60+30);
+  if(cur<13*60) return 120;
+  return 120+(cur-13*60);
+}
+function renderIntra(){
+  const svg=document.getElementById("chartIntra");
+  const d=DATA.intraday||[];
+  if(!d.length){svg.innerHTML="";return;}
+  const W=520,H=250,L=34,R=8,T=12,B=30;
+  const sortedP=d.map(x=>x.pct).slice().sort((a,b)=>a-b);
+  const p90=sortedP[Math.floor(sortedP.length*0.92)];
+  const max=Math.max(p90,1)*1.12;
+  const total=240; // 交易分钟
+  const xAt=mm=>L+(mm/total)*(W-L-R);
+  const bw=(W-L-R)/d.length;
+  const y=v=>T+(H-T-B)*(1-v/max);
+  let s="";
+  for(let i=0;i<=3;i++){const v=max*i/3;
+    s+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#eef0ec"/>
+    <text x="${L-6}" y="${y(v)+3.4}" text-anchor="end" font-size="8.8" fill="#a3abb3">${v.toFixed(0)}%</text>`;}
+  const pcts=d.map(x=>x.pct).sort((a,b)=>b-a);
+  const hotCut=pcts[Math.min(3,pcts.length-1)];
+  d.forEach(x=>{
+    const mm=mins(x.t)-5;           // 每根 5 分钟，取左边界
+    const px=xAt(mm)+0.6, w=(W-L-R)/total*5-1.4;
+    const h=(H-T-B)*Math.min(x.pct,max)/max;
+    const hot=false;
+    s+=`<rect x="${px}" y="${H-B-h}" width="${Math.max(1,w)}" height="${Math.max(0.7,h)}" rx="1"
+      fill="${x.t>="1455"?"var(--brand)":"#cfd6d2"}"
+      onmouseover="showTip(event,'${x.t.slice(0,2)}:${x.t.slice(2)}　占全天 ${fmt(x.pct)}%')" onmouseout="hideTip()"/>`;
+  });
+  [[5,"09:35"],[60,"10:30"],[120,"11:30/13:00"],[150,"13:30"],[210,"14:30"],[235,"15:00"]].forEach(([mm,lab])=>{
+    const px=xAt(mm);
+    s+=`<text x="${px}" y="${H-B+14}" text-anchor="middle" font-size="8.4" fill="#8b95a1">${lab}</text>`;
+  });
+  svg.innerHTML=s;
+  const open=d.filter(x=>mins(x.t)<=30).reduce((a,x)=>a+x.pct,0);
+  const close=d.filter(x=>mins(x.t)>210).reduce((a,x)=>a+x.pct,0);
+  const top=d.slice().sort((a,b)=>b.pct-a.pct)[0];
+  document.getElementById("intraNote").innerHTML=
+    `<span class="mute">开盘30分 <b style="color:var(--ink)">${open.toFixed(1)}%</b> · 尾盘30分 <b style="color:var(--ink)">${close.toFixed(1)}%</b>（基准12.5%）· 峰值 ${top.t.slice(0,2)}:${top.t.slice(2)} ${top.pct.toFixed(1)}%</span>`;
+}
+
+/* ---------------- 成交额缺口归因 ---------------- */
+function renderVol(){
+  const rows=(DATA.rows||[]).filter(r=>r.tier==="focus"&&r.avg20);
+  const el=document.getElementById("gapBars");
+  if(!rows.length){el.innerHTML="";return;}
+  const shortIdx={ "沪深300":"沪深300", "上证50":"上证50", "中证1000":"中证1000", "中证500":"中证500",
+    "科创50":"科创50", "创业板指":"创业板", "上证180":"上证180", "中证800":"中证800",
+    "深证100":"深证100", "上证180金融":"180金融" };
+  const co=r=>{const m=r.name.match(/ETF([一-龥]+)$/);return m?m[1]:"";};
+  const gaps=rows.map(r=>({name:(shortIdx[r.index]||r.index)+" · "+co(r),code:r.code,
+    gap:(r.amount-(r.avg20||0)),amt:r.amount,avg:r.avg20,mult:r.mult}))
+    .sort((a,b)=>a.gap-b.gap);
+  const mx=Math.max(...gaps.map(g=>Math.abs(g.gap)))||1;
+  el.innerHTML=gaps.slice(0,8).map(g=>{
+    const w=Math.max(2,(Math.abs(g.gap)/mx*100)).toFixed(1);
+    const neg=g.gap<0;
+    return `<div class="gaprow">
+      <div class="nm" title="${g.name}">${g.name}</div>
+      <div class="track1"><div class="fill" style="width:${w}%;background:${neg?"#b98c84":"var(--brand)"};right:0"></div></div>
+      <div class="val" style="color:${neg?"#9c7b74":"var(--brand)"}">${sgn(g.gap,1).replace("-","−")}&nbsp;亿</div>
+    </div>`;}).join("");
+  const negSum=gaps.filter(g=>g.gap<0).reduce((a,g)=>a+g.gap,0);
+  const top=gaps.slice(0,3);
+  document.getElementById("volNote2").innerHTML=
+    `全池成交额合计较 20 日均额少 <b style="color:var(--ink)">${Math.abs(negSum).toFixed(1)} 亿</b>，`+
+    `其中 ${top.map(g=>`${g.name.replace("ETF","")} <b style="color:var(--ink)">${sgn(g.gap,1)}</b>`).join("、")} 就占了 `+
+    `<b style="color:var(--ink)">${(top.reduce((a,g)=>a+Math.abs(g.gap),0)/Math.abs(negSum)*100).toFixed(0)}%</b>。缺量高度集中在头部宽基，说明是「主力品种没人做」，而不是全市场普遍冷清。`;
+}
+
+function renderShare(){
+  const d=DATA.share_series||[];
+  const el=document.getElementById("shareNote2");
+  if(!d.length){el.textContent="—";return;}
+  const rows=(DATA.rows||[]).filter(r=>r.tier==="focus");
+  const tot=rows.reduce((a,r)=>a+(r.shares||0),0);
+  if(d.length<2){
+    el.innerHTML=`池内估算总份额 <b style="color:var(--ink)">${fmt(tot,1)} 亿份</b>（规模÷现价推算）· 明日快照后可算净申赎与加仓指数`;
+    return;
+  }
+  const last=d[d.length-1];
+  el.innerHTML=`加仓指数 <b style="color:var(--ink)">${fmt(last.index)}</b>（首日=100），日净申赎 ${sgn(last.delta)} 亿份`;
+}
+
+/* ---------------- 表格 ---------------- */
+document.querySelectorAll(".btn[data-tier]").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".btn[data-tier]").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); tierFilter=b.dataset.tier; renderTable();
+});
+document.querySelectorAll("thead th[data-k]").forEach(th=>th.onclick=()=>{
+  const k=th.dataset.k;
+  if(sortKey===k){sortDir*=-1;}else{sortKey=k;sortDir=-1;}
+  renderTable();
+});
+
+function val(r,k){
+  if(k==="name")return r.name;
+  if(k==="ex1")return (r.excess||{}).d1;
+  return r[k];
+}
+function renderTable(){
+  let rows=DATA.rows.filter(r=>tierFilter==="all"||r.tier===tierFilter);
+  rows.sort((a,b)=>{
+    const va=val(a,sortKey),vb=val(b,sortKey);
+    if(va==null)return 1; if(vb==null)return -1;
+    if(typeof va==="string")return va.localeCompare(vb)*sortDir;
+    return (va-vb)*sortDir;
+  });
+  document.querySelectorAll("thead th").forEach(th=>th.classList.toggle("sorted",th.dataset.k===sortKey));
+  const maxMult=Math.max(...DATA.rows.map(r=>r.mult||0));
+  const label={mult:"放量倍数",amount:"成交额",avg20:"20日均额",active_net:"主动净买入",pct:"涨跌",ex1:"超额",peer_lift:"同指数相对量",shares:"份额",scale:"规模",name:"名称"}[sortKey]||sortKey;
+  let html="";
+  const groups=tierFilter==="all"?["focus","watch"]:[tierFilter];
+  groups.forEach(g=>{
+    const sub=rows.filter(r=>r.tier===g);
+    if(!sub.length)return;
+    html+=`<tr class="grp"><td colspan="11">${g==="focus"?"重点关注 · 2025年报汇金前十大持有人名单":"扩展观察 · 年报未见汇金持仓，仅作对照"}　${sub.length} 只</td></tr>`;
+    sub.forEach(r=>{
+      const m=r.mult||0;
+      const w=Math.max(5,Math.min(56,(m/1.6)*56));
+      const barColor=m>=1.3?"var(--brand)":m>=1.05?"#c98a72":m>=0.75?"#9aa7a0":"#c3cbc4";
+      const prio=t=>/主动|申购|赎回/.test(t)?0:1;
+      const tags=r.tags.slice().sort((a,b)=>prio(a)-prio(b)).slice(0,2).map(t=>{
+        const hot=/放量|申购|主动买|跑赢/.test(t), cold=/冰点|赎回|主动卖|跑输/.test(t);
+        return `<span class="tag ${hot?"hot":cold?"cold":""}">${t}</span>`;}).join("");
+      html+=`<tr>
+        <td class="l nm">${r.name}<span class="code">${r.code} · ${r.index}</span></td>
+        <td><span style="display:inline-block;padding:1px 6px;border-radius:4px;background:${barColor}22;color:${barColor};font-weight:600">${fmt(m)}×</span></td>
+        <td>${fmt(r.amount,1)}</td>
+        <td class="mute">${fmt(r.avg20,1)}</td>
+        <td class="${Math.abs(r.active_net||0)<0.5?"mute":cls(r.active_net)}">${sgn(r.active_net)}</td>
+        <td class="${cls(r.pct)}">${sgn(r.pct)}%</td>
+        <td class="${Math.abs((r.excess||{}).d1||0)<0.2?"mute":cls((r.excess||{}).d1)}">${sgn((r.excess||{}).d1)}%</td>
+        <td>${r.peer_lift==null?"—":fmt(r.peer_lift,2)+"×"}</td>
+        <td>${fmt(r.shares,1)}</td>
+        <td class="mute">${fmt(r.scale,0)}</td>
+        <td class="l">${tags}</td>
+      </tr>`;
+    });
+  });
+  document.getElementById("tbody").innerHTML=html;
+  document.getElementById("rowcount").textContent=`${rows.length} 只 · 按${label}${sortDir<0?"降序":"升序"}`;
+}
+</script>
+</body>
+</html>
