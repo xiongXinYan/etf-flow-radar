@@ -42,10 +42,14 @@ def idx_map(pool) -> dict:
     names = {p["index"] for p in pool}
     return {n: IDX_MAP[n] for n in names if n in IDX_MAP}
 
-# 日K 域名回退链。2026-11-10 实测：web.ifzq.gtimg.cn 被腾讯 WAF 拦截（501），
-# 同接口的 ifzq.gtimg.cn 正常且数据完全一致（收盘价/成交量逐项核对过）。
-# 保留多个域名，任一个被封都能自动切换。
-KLINE_HOSTS = ("ifzq.gtimg.cn", "web.ifzq.gtimg.cn")
+# 日K 数据源顺序。
+# 2026-11-10 实测：腾讯 web.ifzq / ifzq 两个域名的 fqkline 全部被 WAF 拦截（501），
+# 只有实时 qt.gtimg 和 5 分钟 mkline 还活着。因此主源改为东方财富，
+# 腾讯保留作备份。
+# 东财额外红 利：直接返回成交额（字段 f57），不用「成交量×收盘价」估算，
+# 20 日均额的口径因此更准。
+EM_KLINE = "http://push2his.eastmoney.com/api/qt/stock/kline/get"
+KLINE_HOSTS = ("ifzq.gtimg.cn", "web.ifzq.gtimg.cn")     # 腾讯备份链路
 
 # 每次请求间隔（秒）。连续高频采集会触发 WAF，这里主动降速。
 REQUEST_GAP = 0.35
@@ -72,20 +76,49 @@ def _is_waf(resp) -> bool:
     return "waf.tencent.com" in t
 
 
+# 直连会话：行情和交易所接口都是境内服务，不该经过代理。
+# 系统代理（如 127.0.0.1:7897）断开时会抛出
+# ProxyError: Unable to connect to proxy，把整个采集带崩。
+_NO_PROXY = None
+
+
+def _session(direct=True):
+    global _NO_PROXY
+    if _NO_PROXY is None:
+        sess = requests.Session()
+        sess.trust_env = not direct
+        if direct:
+            sess.proxies = {}
+        _NO_PROXY = sess
+    return _NO_PROXY
+
+
+def reset_session():
+    global _NO_PROXY
+    if _NO_PROXY is not None:
+        _NO_PROXY.close()
+    _NO_PROXY = None
+
+
 def get(url: str, **kw) -> requests.Response:
+    """先直连；直连不通时才退回系统代理。
+
+    国内行情接口直连通常更快，且不会被本地代理的断连影响。
+    """
     last = None
     for attempt in range(3):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20, **kw)
-            if _is_waf(r):
-                raise WAFBlocked(f"WAF blocked {url}")
-            r.raise_for_status()
-            return r
-        except WAFBlocked:
-            raise
-        except Exception as e:  # noqa: BLE001
-            last = e
-            time.sleep(1.2 * (attempt + 1))
+        for sess in (_session(direct=True), _session(direct=False)):
+            try:
+                r = sess.get(url, headers=HEADERS, timeout=20, **kw)
+                if _is_waf(r):
+                    raise WAFBlocked(f"WAF blocked {url}")
+                r.raise_for_status()
+                return r
+            except WAFBlocked:
+                raise
+            except Exception as e:  # noqa: BLE001
+                last = e
+        time.sleep(1.2 * (attempt + 1))
     raise RuntimeError(f"GET failed {url}: {last}")
 
 
@@ -150,6 +183,40 @@ def _f(payload, i):
         return None
 
 
+def em_secid(code: str) -> str:
+    """东财 secid：沪市 1.，深市 0.。指数代码形如 sh000300 -> 1.000300。"""
+    c = code[2:] if code[:2] in ("sh", "sz") else code
+    market = "1" if code.startswith("sh") or (code[:2] not in ("sh", "sz") and c[0] == "5") else "0"
+    return f"{market}.{c}"
+
+
+def fetch_daily_em(code, days=60):
+    """东方财富不复权日K（fqt=0 即不复权）。返回结构与腾讯版一致。"""
+    h = dict(HEADERS, Referer="https://quote.eastmoney.com/")
+    params = {
+        "secid": em_secid(code),
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        "klt": "101", "fqt": "0", "end": "20500101", "lmt": str(days),
+    }
+    r = _session(direct=True).get(EM_KLINE, params=params, headers=h, timeout=20)
+    r.raise_for_status()
+    d = (r.json() or {}).get("data") or {}
+    out = []
+    for row in d.get("klines") or []:
+        x = row.split(",")
+        # date,open,close,high,low,volume(手),amount(元)
+        out.append({
+            "date": x[0], "open": float(x[1]), "close": float(x[2]),
+            "high": float(x[3]), "low": float(x[4]),
+            "volume_lots": float(x[5]),
+            "amount": float(x[6]) if len(x) > 6 and x[6] else None,
+        })
+    if not out:
+        raise RuntimeError(f"eastmoney empty for {code}")
+    return out
+
+
 def fetch_daily(code, days=60):
     """不复权日K。为什么必须不复权：
 
@@ -157,6 +224,11 @@ def fetch_daily(code, days=60):
     qfq 收盘是 4.14、不复权是 4.135。用 qfq 收盘乘「不复权成交量」算历史成交额，
     在发生过分红/折算的标的上会系统性偏移；成交额必须用真实成交价算。
     """
+    try:
+        return fetch_daily_em(code, days)
+    except Exception as em_err:  # noqa: BLE001
+        if os.environ.get("ETF_DEBUG"):
+            print(f"[daily] eastmoney failed for {code}: {em_err}")
     s = sym(code)
     last = None
     for host in KLINE_HOSTS:
@@ -250,14 +322,8 @@ _TAG = re.compile(r"<[^>]+>")
 
 
 def _direct_session():
-    """交易所接口走直连。
-
-    系统代理（如 127.0.0.1:7897）会让 szse 的连续请求直接读超时，
-    所以这里显式 trust_env=False，不走环境代理。
-    """
-    s = requests.Session()
-    s.trust_env = False
-    return s
+    """交易所接口走直连（见 _session 注释）。"""
+    return _session(direct=True)
 
 
 def _strip(x):

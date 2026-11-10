@@ -115,7 +115,7 @@ def load() -> dict:
 
 
 def _daily_avg_amount(rec) -> float | None:
-    """20日均额：不复权日K 成交量(手)×100×不复权收盘价。排除今日。
+    """20日均额：优先用日K 自带成交额，其次 成交量(手)×100×不复权收盘价。排除今日。
 
     必须用不复权价：qfq 收盘是复权价，不是真实成交价，
     乘不复权成交量会算出一个并不存在的成交额。
@@ -124,7 +124,9 @@ def _daily_avg_amount(rec) -> float | None:
     days = days[-20:]
     if len(days) < 5:
         return None
-    vals = [d["volume_lots"] * 100 * d["close"] for d in days]
+    # 东财日K 直接给成交额，优先用它；腾讯源没有该字段时退回「量×价」
+    vals = [d["amount"] if d.get("amount") else d["volume_lots"] * 100 * d["close"]
+            for d in days]
     return sum(vals) / len(vals)
 
 

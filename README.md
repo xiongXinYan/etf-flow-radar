@@ -120,3 +120,14 @@ On 2026-11-10 the daily-kline host `web.ifzq.gtimg.cn` started returning a Tence
 `fetch_daily()` now walks `KLINE_HOSTS = ("ifzq.gtimg.cn", "web.ifzq.gtimg.cn")`. The WAF page is detected by the `waf.tencent.com` marker and raised as `WAFBlocked` (not retried), so a blocked host fails over immediately instead of burning three retries. Verified the substitute host byte-for-byte: same close, same volume, same `day` (unadjusted) field.
 
 `REQUEST_GAP = 0.35` seconds is inserted between ETFs. The original block was probably provoked by several back-to-back full collection runs during testing; a full run now takes ~30 s instead of ~24 s and no longer trips the WAF.
+
+## Quote endpoint failover
+
+Two separate failures on 2026-11-10, with different causes:
+
+1. **Proxy.** The system proxy at `127.0.0.1:7897` dropped connections, raising `ProxyError: Unable to connect to proxy` and killing the whole run. Domestic quote and exchange endpoints never needed a proxy, so `get()` now goes direct first and only falls back to the proxy if a direct attempt fails. Verified by pointing `HTTP_PROXY`/`HTTPS_PROXY` at a dead port: full run still completed with zero degraded rows.
+2. **WAF.** Tencent began returning 501 WAF pages for `fqkline` on **both** `ifzq.gtimg.cn` and `web.ifzq.gtimg.cn`, while `qt.gtimg.cn` (realtime) and the `mkline` 5-minute endpoint stayed healthy. Failover between Tencent hosts could not help, so the primary daily source is now Eastmoney (`push2his.eastmoney.com`, `fqt=0` for unadjusted), with Tencent kept as backup.
+
+The Eastmoney source also returns traded amount directly (`f57`), so the 20-day average no longer relies on estimation. Cross-checked on 510300: real amount average vs volume × close differs by 0.19%.
+
+`REQUEST_GAP = 0.35` seconds separates ETFs, and a detected WAF page raises `WAFBlocked` instead of being retried.
