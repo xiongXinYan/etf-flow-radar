@@ -80,6 +80,7 @@ def _row(r):
         "share_chg": m.get("share_chg"),
         "share_chg_amt": m.get("share_chg_amt"),
         "shares_source": m.get("shares_source"),
+        "amount_quality": m.get("amount_quality"),
         "excess": m.get("excess") or {},
         "peer_mult_med": m.get("peer_mult_med"),
         "peer_lift": m.get("peer_lift"),
