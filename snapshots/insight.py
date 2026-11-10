@@ -15,24 +15,22 @@ import os
 import statistics
 
 import metrics
+from metrics import shares_of
 
 SNAP_DIR = metrics.SNAP_DIR
-IDX_PATH = os.path.join(SNAP_DIR, "index_daily.json")
+IDX_PATH = metrics.IDX_PATH
 
 # 判定阈值（集中在此，便于调整）
 TH = {
     "mult_strong": 1.8,      # 同时点倍数强信号
     "mult_mild": 1.3,        # 温和放量
     "active_strong": 30e8,   # 主动净买入绝对值（元）
-    "share_strong": 10.0,    # 池内单日净申购（亿份）
+    "share_strong": 10.0,    # 池内单日净申购（亿元）
+    "coverage_min": 0.6,     # 主动盘数据覆盖率下限，低于此不参与综合评分
 }
 
-IDX_MAP = {
-    "沪深300": "sh000300", "上证50": "sh000016", "中证1000": "sh000852",
-    "中证500": "sh000905", "科创50": "sh000688", "创业板指": "sz399006",
-    "上证180": "sh000010", "上证380": "sh000009", "中证800": "sh000906",
-    "深证100": "sz399330", "中证A500": "sh000510", "上证180金融": "sh000018",
-}
+# 指数映射统一从采集模块取，保证「采什么」和「算什么」一致
+IDX_MAP = metrics.IDX_MAP
 
 
 def load_index():
@@ -146,18 +144,35 @@ def judge(b, idx):
     exs = [r["m"]["excess"].get("d1") for r in focus if r["m"].get("excess")]
     ex_med = statistics.median(exs) if exs else None
 
-    # 4) 综合结论（多因子打分，替代单一倍数阈值）
+    # 4) 综合结论（四个一级因子，去除重复计数）
+    # 旧版把「成交额倍数」「主动净买入」「涨跌」「超额」直接相加，
+    # 但主动净买入 = 方向 × 成交额、涨跌与超额高度相关，
+    # 等于对「放量」和「上涨」各加了两次权。这里改为互不重复的四项：
+    #   一级市场申赎 40%（份额×净值，最硬）
+    #   成交活跃度   25%
+    #   价格表现(超额) 20%
+    #   二级方向估算 15%
+    # 涨跌幅只作为背景变量，不进评分。
     score = 0.0
-    if mult is not None:
-        score += max(-1.5, min(2.0, (mult - 1) * 2.2))
-    if net is not None:
-        score += max(-1.5, min(2.0, net / 4e9))
+    score_parts = {}
+    sh_amt = None
     if b["share_series"] and len(b["share_series"]) > 1 and b["share_series"][-1]["delta"] is not None:
-        score += max(-1.0, min(1.0, b["share_series"][-1]["delta"] / 20))
+        sh_amt = b["share_series"][-1]["delta"]          # 亿元
+        score_parts["share"] = max(-1.0, min(1.6, sh_amt / 40))
+        score += score_parts["share"]
+    if mult is not None:
+        score_parts["turnover"] = max(-0.75, min(1.0, (mult - 1) * 1.5))
+        score += score_parts["turnover"]
     if ex_med is not None:
-        score += max(-0.5, min(0.5, ex_med / 1.0))
-    if pct is not None:
-        score += max(-0.3, min(0.3, pct / 1.0))
+        score_parts["excess"] = max(-0.5, min(0.8, ex_med / 1.0))
+        score += score_parts["excess"]
+    # 覆盖率不足时，主动盘只能作为方向参考，不参与评分
+    cov = A.get("net_covered")
+    if net is not None and cov is not None and cov >= TH["coverage_min"]:
+        score_parts["active"] = max(-0.6, min(0.6, net / 8e9))
+        score += score_parts["active"]
+    else:
+        score_parts["active"] = 0.0
 
     if score >= 2.2:
         verdict = ("强信号：疑似集中买入", "buy-strong")
@@ -180,12 +195,13 @@ def judge(b, idx):
         notes.append(f"池内相对跟踪指数的超额中位数为 {ex_med:+.2f}%，价格偏离基准，注意是否存在指数调仓或成分股事件。")
     elif ex_med is not None:
         notes.append(f"ETF 相对跟踪指数的超额中位数仅 {ex_med:+.2f}%，价格基本由指数带动，资金没有在 ETF 层面额外定价。")
-    if b["share_series"] and len(b["share_series"]) > 1 and b["share_series"][-1]["delta"] is not None:
-        d = b["share_series"][-1]["delta"]
-        if d >= 5:
-            notes.append(f"份额推算净申购 {d:+.1f} 亿份：申购可以确认，但无法确认申购方是谁。")
-        elif d <= -5:
-            notes.append(f"份额推算净赎回 {d:+.1f} 亿份：有资金在离场。")
+    if sh_amt is not None:
+        if sh_amt >= 20:
+            notes.append(f"份额变化折算估算净申购 {sh_amt:+.1f} 亿元：申购行为可以确认，但无法确认申购方是谁。")
+        elif sh_amt <= -20:
+            notes.append(f"份额变化折算估算净赎回 {sh_amt:+.1f} 亿元：有资金在离场。")
+    if net is not None and (cov is None or cov < TH["coverage_min"]):
+        notes.append(f"主动盘数据覆盖率仅 {(cov or 0)*100:.0f}%，低于 {TH['coverage_min']*100:.0f}% 下限：本日主动买卖方向只作参考，不计入综合评分。")
     if not (mult and mult >= TH["mult_strong"]):
         notes.append("单一交易日的缩量/平量不能推翻长期判断：真正的集中买入通常伴随连续 2—3 个交易日的量能抬升与份额同向变动，建议按周观察而非盯单日。")
 
@@ -196,6 +212,9 @@ def judge(b, idx):
         "fund": fund,
         "vol": vol,
         "excess_med": ex_med,
+        "score_parts": {k: round(v, 2) for k, v in score_parts.items()},
+        "coverage": round(cov, 3) if cov is not None else None,
+        "share_amt": round(sh_amt, 2) if sh_amt is not None else None,
         "notes": notes,
     }
 
@@ -212,16 +231,18 @@ def enrich(day_key=None):
         prev = {r["code"]: r for r in hist[dates[i - 1]]["pool"]}
         for r in b["rows"]:
             p = prev.get(r["code"])
-            if not p or not p.get("scale_yi") or not p.get("price"):
+            psh = shares_of(p) if p else None
+            if psh is None or not r["m"]["shares"]:
                 r["m"]["share_chg"] = None
+                r["m"]["share_chg_amt"] = None
                 continue
-            pshare = p["scale_yi"] / p["price"]
-            r["m"]["share_chg"] = round(r["m"]["shares"] - pshare, 2) if r["m"]["shares"] else None
-            r["m"]["share_delta"] = round(p["scale_yi"] - (r["m"]["scale"] or 0), 2)
+            r["m"]["share_chg"] = round(r["m"]["shares"] - psh, 2)
+            # 申赎金额估算：份额变化 × 当日现价（元 -> 亿元）
+            r["m"]["share_chg_amt"] = round(r["m"]["share_chg"] * (r["m"]["price"] or 0) / 100, 3)
     else:
         for r in b["rows"]:
             r["m"]["share_chg"] = None
-            r["m"]["share_delta"] = None
+            r["m"]["share_chg_amt"] = None
 
     # 同行放量对照：同指数内倍数中位
     by_idx: dict[str, list] = {}

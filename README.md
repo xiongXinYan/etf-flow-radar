@@ -22,10 +22,10 @@ Four signals, deliberately kept separate:
 |---|---|---|
 | Turnover multiple | Today's cumulative turnover vs. 20-day average, aligned to the same point in the session | Reliable, but noisy day to day |
 | Active net flow | Tick-direction estimate from outer/inner volume | Direction only, and arbitrage cancels a lot of it |
-| Estimated shares | Quote-side market cap ÷ price | Sign is meaningful; magnitude is approximate |
+| Estimated shares | Volume ÷ turnover rate (fallback: quote-side market cap ÷ price) | Sign is meaningful; magnitude is approximate |
 | Excess return | ETF move minus tracking-index move | Strips out the beta that dominates ETF prices |
 
-These feed a weighted score from −5 to +5, bucketed into plain-language verdicts. Thresholds live in one dictionary (`TH` in `snapshots/insight.py`) so they can be tuned without touching the logic.
+These feed a weighted score, bucketed into plain-language verdicts. Weights are mutually exclusive (primary-market flow 40%, turnover 25%, excess return 20%, trade-direction estimate 15%); price change is a background variable and does not enter the score. Thresholds live in one dictionary (`TH` in `snapshots/insight.py`) so they can be tuned without touching the logic.
 
 ## Why this differs from the usual version
 
@@ -35,7 +35,7 @@ These feed a weighted score from −5 to +5, bucketed into plain-language verdic
    - shares up + positive excess → accumulation that lifts price
    - shares up + negative excess → absorbing supply without lifting price, which looks far more like passive allocation
 4. **Peer-relative volume.** Several ETFs on the same index all surging looks like passive or arbitrage demand. Only one surging looks like a deliberate buyer. Metric: this ETF's multiple ÷ the same-index median.
-5. **A continuous score instead of a hard threshold.** A single "1.8× means they showed up" cut is fragile. Five factors are weighted into a score, then bucketed.
+5. **A continuous score instead of a hard threshold.** A single "1.8× means they showed up" cut is fragile. Independent factors are weighted into a score, then bucketed.
 6. **Same-point alignment throughout.** Intraday, the denominator is always `20-day average × that ETF's historical average fraction completed by this time`, so a half-day's turnover is never divided by a full-day average.
 7. **Turnover-gap attribution.** Points at which large-cap ETFs account for today's shortfall, rather than showing one aggregate multiple and leaving the reader to guess.
 
@@ -87,3 +87,12 @@ python -m http.server 8080
 ## A note on naming
 
 The Chinese term 国家队 ("national team") is market slang for state-linked buying, not an official designation. This project is best understood as an analytical tool for inferring flow from public data — not a source of official positions, and not investment advice. The repository name reflects the data and the method, not the actors.
+
+## Data conventions (verified, not assumed)
+
+- **Turnover average uses unadjusted prices.** Tencent returns both `qfqday` (adjusted) and `day` (unadjusted). Adjusted close × unadjusted volume is an amount that never traded, so the 20-day average reads `day`.
+- **Shares come from `volume ÷ turnover_rate`**, not `market cap ÷ price`. Field 45 is `volume × price`, so dividing it by price just reconstructs the volume again and underweights ~1.0 CNY share classes.
+- **Pool-level totals are summed in money, not in shares.** One billion shares at NAV 4.0 is 4 billion CNY; the same count at NAV 1.3 is 1.3 billion. Summing share counts across ETFs inflates high-NAV products into fake accumulation.
+- **Index klines are fetched by `fetch_snapshot.py` into `index_daily.json`.** Before this, nothing wrote that file and excess return silently used stale data.
+- **5-minute bars accumulate in `snapshots/m5/`.** The upstream endpoint caps at ~320 bars (about 6.7 sessions) regardless of the requested count, so the same-point intraday curve is only trustworthy once a few weeks of snapshots have piled up.
+- **Timestamps are parsed, never sliced.** Field 30 is `yyyymmddHHMMSS`; a fixed `[8:12]` slice breaks silently if the format ever changes to `YYYY-MM-DD HH:MM:SS`.

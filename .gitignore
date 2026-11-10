@@ -4,3 +4,4 @@ __pycache__/
 .box-agent-scratch/
 *.png
 .idea/
+snapshots/m5/
