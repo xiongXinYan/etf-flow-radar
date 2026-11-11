@@ -245,7 +245,7 @@ def enrich(day_key=None):
                 continue
             r["m"]["share_chg"] = round(r["m"]["shares"] - psh, 2)
             # 申赎金额估算：份额变化 × 当日现价（元 -> 亿元）
-            r["m"]["share_chg_amt"] = round(r["m"]["share_chg"] * (r["m"]["price"] or 0) / 100, 3)
+            r["m"]["share_chg_amt"] = round(r["m"]["share_chg"] * (r["m"].get("price") or 0) / 100, 3)
     else:
         for r in b["rows"]:
             r["m"]["share_chg"] = None

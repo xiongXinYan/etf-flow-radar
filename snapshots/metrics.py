@@ -228,6 +228,7 @@ def compute_row(rec, curve) -> dict:
         "ratio_mode": ratio_mode,
         "active_net": active_net,
         "shares": shares,
+        "price": price,
         "pct": rec.get("pct"),
         "scale": rec.get("scale_yi"),
         "hhmm": hhmm,

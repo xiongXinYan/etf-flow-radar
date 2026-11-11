@@ -30,16 +30,19 @@ echo ============================================================
 echo.
 
 REM ---------- locate python ----------
+REM  Priority: python on PATH > py launcher > project .venv > home fixed path
+REM   Office machine: python is on PATH (D:\env\Python312), hit at step 1.
+REM   Home machine:   python is NOT on PATH; falls back to E:\ fixed install.
 set "PY="
 where python >nul 2>nul && set "PY=python"
 if not defined PY (
     where py >nul 2>nul && set "PY=py -3"
 )
 if not defined PY (
-    if exist "E:\workApp\python\python.exe" set "PY=E:\workApp\python\python.exe"
+    if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
 )
 if not defined PY (
-    if defined BOX_AGENT_PYTHON if exist "%BOX_AGENT_PYTHON%" set "PY=%BOX_AGENT_PYTHON%"
+    if exist "E:\workApp\python\python.exe" set "PY=E:\workApp\python\python.exe"
 )
 
 if not defined PY (
@@ -49,6 +52,20 @@ if not defined PY (
 )
 
 echo Python  : %PY%
+echo.
+
+REM ---------- check and install dependencies ----------
+%PY% -c "import requests" >nul 2>nul
+if errorlevel 1 (
+    echo [INFO] requests not found, installing ...
+    %PY% -m pip install --quiet requests
+    if errorlevel 1 (
+        echo [ERROR] pip install failed. Run manually:
+        echo         %PY% -m pip install requests
+        goto :fail
+    )
+    echo [OK]    requests installed.
+)
 echo.
 
 REM ---------- run ----------
