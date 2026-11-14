@@ -12,6 +12,8 @@ REM
 REM  Extra arguments are passed through to update.py, e.g.
 REM      update.bat --check
 REM      update.bat --no-fetch
+REM      update.bat --gap-check
+REM      update.bat --no-gapfill
 REM ============================================================
 
 cd /d "%~dp0"

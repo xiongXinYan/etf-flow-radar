@@ -46,22 +46,31 @@ index.html                 Single-file dashboard, data embedded
 data.json                  Same payload, for scripts and further analysis
 update.py                  One-command pipeline (preferred entry point)
 update.bat                 Windows wrapper for update.py
+gapfill.py                 Startup gap check + historical repair
 snapshots/
   pool.json                The 24-ETF universe
   history.json             Daily snapshots (quotes + daily bars + 5-min bars)
+  daily/{code}.json        Daily klines, consumed by the historical flow series
   index_daily.json         Index daily bars, for excess return
+  shares_official.json     Exchange-reported shares, keyed by data date
+  gap_report.json          Latest gap-check report (written by gapfill.py)
   fetch_snapshot.py        Collection only
   metrics.py               Signal computation
   insight.py               Scoring, tagging, thresholds
+  flow_history.py          Historical net subscription from official shares
   export_data.py           Writes data.json and injects it into index.html
 ```
 
 ## Usage
 
 ```bash
-python update.py              # full run
-python update.py --check      # probe quote endpoints only, no files written
-python update.py --no-fetch   # recompute from existing snapshots (after changing thresholds)
+python update.py                     # gap repair -> fetch -> compute -> inject
+python update.py --check             # probe quote endpoints only, no files written
+python update.py --no-fetch          # recompute from existing snapshots (no network)
+python update.py --gap-check         # report missing sessions only, writes nothing
+python update.py --no-gapfill        # skip gap repair, fetch today as usual
+python update.py --gap-days 60       # widen the gap-check window (default 20 sessions)
+python gapfill.py --check            # standalone read-only gap check
 ```
 
 Both underlying scripts still work standalone: `fetch_snapshot.py` only collects, `export_data.py` only computes and injects.
@@ -180,6 +189,32 @@ Measured result: 120 sessions of klines for all 24 ETFs, 54 sessions of SSE shar
 **Coverage is deliberately incomplete.** Only Shanghai-listed ETFs can have backfilled shares, so historical flow covers 13 of the 20 focus ETFs. Missing Shenzhen flows are skipped, not estimated — `flow_n` and `comparable_n` record what each day actually covers, and the dashboard says so plainly.
 
 `backfill.py` writes `snapshots/daily/`, `snapshots/index_daily.json` and `snapshots/shares_official.json`. It **does not** write `history.json`: that file records what the market looked like in real time, and splicing today's daily bars into a past session would fabricate intraday data that never existed.
+
+## Automatic gap repair on startup
+
+The collector only ever writes *today*. Skip a few sessions and those days disappear from `daily/`, `shares_official.json` and `history.json`, which truncates the historical net-subscription chart. `update.py` now runs `gapfill.py` **before** fetching quotes, so the current export can use whatever was just repaired.
+
+```bash
+python gapfill.py --check        # read-only report, writes nothing
+python gapfill.py --days 60      # widen the window (default 20 sessions)
+python update.py --gap-check     # same check via the one-command entry point
+python update.py --no-gapfill    # skip the check
+```
+
+The trading calendar comes from index daily bars rather than guessed weekdays, and **today is excluded** — today is the live fetch's job. A gap check costs one kline request; a repair only touches sources that are actually missing. All writes are atomic (`tmp` + replace) and a failed repair is a warning, never a reason to abort the daily update.
+
+| Source | Repairable | Mechanism |
+|---|---|---|
+| `snapshots/daily/{code}.json` | yes | Eastmoney klines merged in; the history start is deliberately not extended |
+| `index_daily.json` | yes | same, merged per index |
+| SSE rows in `shares_official.json` | yes | `STAT_DATE` per missing session; returned date must match the requested date |
+| SZSE historical shares | **no** | only the latest snapshot is served; history must accumulate by running daily |
+| `history.json` intraday snapshots | **no** | real-time and 5-minute state cannot be reconstructed from daily bars |
+| `m5/` | limited | upstream keeps ~320 bars (≈6.7 sessions); older days are gone |
+
+`snapshots/gap_report.json` records per-date gaps, what was recovered and what is not recoverable. A trimmed `data_gaps` summary is embedded in `data.json` and shown above the net-subscription chart, including the most recent successful repair. Snapshot gaps are counted **after the first snapshot** only: `backfill.py` deliberately never writes `history.json`, so the pre-snapshot period is not a lapse and is not reported as one.
+
+Measured on 2026-11-14 after a two-session lapse: 3 sessions recovered (11-11 → 11-13), 24 kline files refreshed, 2 SSE share dates refilled, and the computable net-subscription series extended from 53 to 56 days (11-11 +2.8, 11-12 −99.8, 11-13 −82.1 亿元). Two sessions of intraday snapshots remained missing and are labelled as such rather than back-filled with fabricated data.
 
 ## First real result
 

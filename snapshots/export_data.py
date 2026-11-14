@@ -28,6 +28,25 @@ def _flow_history():
         return {"days": [], "meta": {"error": type(e).__name__}}
 
 
+def _gap_summary():
+    """启动时 gapfill.py 产出的历史缺口报告。没有就给空字典，页面照常渲染。"""
+    try:
+        path = os.path.join(ROOT, "snapshots", "gap_report.json")
+        with open(path, encoding="utf-8") as f:
+            r = json.load(f)
+        return {
+            "checked_at": r.get("checked_at"),
+            "window": r.get("window"),
+            "recovered_dates": (r.get("recovered") or {}).get("dates") or [],
+            "last_recovered": r.get("last_recovered") or {},
+            "unrecoverable_dates": r.get("unrecoverable_dates") or [],
+            "by_date": r.get("by_date") or {},
+            "notes": r.get("notes") or [],
+        }
+    except (json.JSONDecodeError, OSError, TypeError, AttributeError):
+        return {}
+
+
 def build_payload():
     b = insight.enrich()
     hist = insight.metrics.load()
@@ -58,6 +77,7 @@ def build_payload():
         "degraded": b["degraded"],
         "judge": b["judge"],
         "flow_history": _flow_history(),
+        "data_gaps": _gap_summary(),
         "agg": {
             "amount": round(b["agg"]["amount"] / 1e8, 2),
             "avg20": round((b["agg"]["avg20"] or 0) / 1e8, 2),
